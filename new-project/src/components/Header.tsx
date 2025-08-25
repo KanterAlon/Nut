@@ -1,16 +1,31 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { FaHome, FaUsers, FaRegNewspaper, FaEnvelopeOpenText } from 'react-icons/fa';
 import { SignedIn, SignedOut, UserButton } from '@clerk/nextjs';
 import '../styles/header.css';
 
 export default function Header() {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [devMode, setDevMode] = useState(false);
 
   const toggleMenu = () => setMenuOpen(prev => !prev);
   const closeMenu = () => setMenuOpen(false);
+
+  const toggleDevMode = () => {
+    const value = !devMode;
+    setDevMode(value);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('devMode', String(value));
+    }
+  };
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setDevMode(localStorage.getItem('devMode') === 'true');
+    }
+  }, []);
 
   return (
     <header>
@@ -56,6 +71,14 @@ export default function Header() {
           <UserButton afterSignOutUrl="/" />
         </SignedIn>
       </nav>
+
+      <button
+        type="button"
+        className="dev-toggle"
+        onClick={toggleDevMode}
+      >
+        {devMode ? 'Modo Dev: ON' : 'Modo Dev: OFF'}
+      </button>
 
       <div className={`overlay ${menuOpen ? 'active' : ''}`} onClick={closeMenu}></div>
     </header>
