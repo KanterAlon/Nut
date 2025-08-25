@@ -16,7 +16,8 @@
     "react-dom": "19.1.0",
     "react-icons": "^4.12.0",
     "react-webcam": "^7.2.0",
-    "nodemailer": "^6.9.12"
+    "nodemailer": "^6.9.12",
+    "@upstash/redis": "^1.32.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
