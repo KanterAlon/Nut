@@ -1,6 +1,12 @@
-import SearchResults from '../../components/SearchResults';
+import { Suspense } from 'react';
+import SearchResults from '@/components/SearchResults';
+import Loader from '@/components/Loader';
 
 export default function SearchPage() {
-  return <SearchResults />;
+  return (
+    <Suspense fallback={<Loader />}>
+      <SearchResults />
+    </Suspense>
+  );
 }
 

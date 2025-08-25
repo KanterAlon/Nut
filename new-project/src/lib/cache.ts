@@ -1,7 +1,7 @@
 import redis from './redis';
 
 const CACHE_THRESHOLD = parseInt(process.env.CACHE_THRESHOLD || '3', 10);
-const CACHE_TTL = 15778800; // 24 hours
+const CACHE_TTL = 86400; // 24 hours
 
 export async function readCache(key: string) {
   if (!redis) {
