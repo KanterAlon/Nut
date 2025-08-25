@@ -1,5 +1,5 @@
 {
-  "name": "zeta-monorepo",
+  "name": "nut-monorepo",
   "private": true,
   "workspaces": [
     "backend",

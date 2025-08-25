@@ -1,4 +1,4 @@
-# Zeta-v2
+# Nut
 
 ## Environment configuration
 
