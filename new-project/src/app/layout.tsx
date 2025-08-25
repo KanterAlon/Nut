@@ -1,7 +1,10 @@
 import type { Metadata } from "next";
+import { ClerkProvider } from "@clerk/nextjs";
 import "./globals.css";
 import "./home.css";
 import "../styles/header.css";
+import "../styles/login.css";
+import "../styles/signup.css";
 import Header from "../components/Header";
 
 export const metadata: Metadata = {
@@ -15,12 +18,14 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body>
-        <Header />
-        <div id="root">{children}</div>
-      </body>
-    </html>
+    <ClerkProvider>
+      <html lang="en">
+        <body>
+          <Header />
+          <div id="root">{children}</div>
+        </body>
+      </html>
+    </ClerkProvider>
   );
 }
 
