@@ -1,14 +1,16 @@
 'use client';
 
-import { FaRegImage, FaHamburger, FaFire, FaDrumstickBite } from 'react-icons/fa';
-
 export default function NutritionEvaluation() {
   return (
     <section className="sec-nutrition-evaluation">
       <div className="nutrition-evaluation-inner">
         <div className="product-info">
           <div className="img-rating">
-            <FaRegImage className="product-image" size={80} />
+            <img
+              src="https://via.placeholder.com/225"
+              alt="Producto"
+              className="product-image"
+            />
             <div className="rating">
               <div className="circle red"></div>
               <h3>Muy Malo</h3>
@@ -16,15 +18,15 @@ export default function NutritionEvaluation() {
           </div>
           <div className="nutrition-details">
             <div className="nutrition-detail">
-              <FaHamburger />
+              <img src="https://via.placeholder.com/25" alt="Alto en grasas" />
               <span>Alto en Grasas</span>
             </div>
             <div className="nutrition-detail">
-              <FaFire />
+              <img src="https://via.placeholder.com/25" alt="Alto en calorías" />
               <span>Alto en Calorías</span>
             </div>
             <div className="nutrition-detail">
-              <FaDrumstickBite />
+              <img src="https://via.placeholder.com/25" alt="Bajas proteínas" />
               <span>Bajas Proteínas</span>
             </div>
           </div>

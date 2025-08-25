@@ -1,26 +1,19 @@
 'use client';
 
-import {
-  FaUtensils,
-  FaClipboardCheck,
-  FaInfoCircle,
-  FaBalanceScale,
-} from 'react-icons/fa';
-
 const data = [
-  { icon: FaUtensils, text: 'Ingresás que querés comer' },
-  { icon: FaClipboardCheck, text: 'Obtenés feedback nutricional rápido' },
-  { icon: FaInfoCircle, text: 'Te informás íntegramente con facilidad' },
-  { icon: FaBalanceScale, text: 'Te ayudamos a tomar una decisión' },
+  { img: 'https://via.placeholder.com/40', text: 'Ingresás que querés comer' },
+  { img: 'https://via.placeholder.com/40', text: 'Obtenés feedback nutricional rápido' },
+  { img: 'https://via.placeholder.com/40', text: 'Te informás íntegramente con facilidad' },
+  { img: 'https://via.placeholder.com/40', text: 'Te ayudamos a tomar una decisión' },
 ];
 
 export default function InfoButtons() {
   return (
     <div className="info-buttons">
-      {data.map(({ icon: Icon, text }, i) => (
+      {data.map((item, i) => (
         <div className="info-button" key={i}>
-          <Icon size={32} />
-          <span>{text}</span>
+          <img src={item.img} alt={`icon-${i}`} />
+          <span>{item.text}</span>
         </div>
       ))}
     </div>

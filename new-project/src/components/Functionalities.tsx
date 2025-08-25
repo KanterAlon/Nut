@@ -1,24 +1,22 @@
 'use client';
 
-import { FaExchangeAlt, FaUsers, FaBook } from 'react-icons/fa';
-
 const cards = [
   {
-    icon: FaExchangeAlt,
+    img: 'https://via.placeholder.com/300x200?text=Comparador',
     title: 'Comparador de alimentos y bebidas',
     desc: 'Compara de manera visual y rápida el valor nutricional...',
     href: '/index',
     btn: 'Pruébalo Ahora',
   },
   {
-    icon: FaUsers,
+    img: 'https://via.placeholder.com/300x200?text=Comunidad',
     title: 'Interactuá con usuarios de intereses similares',
     desc: 'Conectate con personas que comparten tus metas...',
     href: '/community',
     btn: 'Ir a comunidad',
   },
   {
-    icon: FaBook,
+    img: 'https://via.placeholder.com/300x200?text=Blog',
     title: 'Aprendé sobre diversos temas de nutrición',
     desc: 'Explorá artículos creados por nuestro equipo...',
     href: '/blog',
@@ -32,10 +30,10 @@ export default function Functionalities() {
       <div className="funcionalidades-inner">
         <h2>Otras cosas que podés disfrutar de la plataforma Nut</h2>
         <div className="cards-container">
-          {cards.map(({ icon: Icon, title, desc, href, btn }, i) => (
+          {cards.map(({ img, title, desc, href, btn }, i) => (
             <div className="card-funcionalidad" key={i}>
               <div className="contenedor-imagen-card-funcionalidad">
-                <Icon size={64} />
+                <img src={img} alt="" />
               </div>
               <h3 className="titulo-card-funcionalidad">{title}</h3>
               <p className="descripcion-card-funcionalidad">{desc}</p>
