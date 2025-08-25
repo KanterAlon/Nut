@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { FaHome, FaUsers, FaRegNewspaper, FaEnvelopeOpenText } from 'react-icons/fa';
+import { SignedIn, SignedOut, UserButton } from '@clerk/nextjs';
 import '../styles/header.css';
 
 export default function Header() {
@@ -46,9 +47,14 @@ export default function Header() {
           <FaEnvelopeOpenText size={30} />
           <span>Contacto</span>
         </Link>
-        <Link href="/login" className="login-button" onClick={closeMenu}>
-          <span className="button-text">Login</span>
-        </Link>
+        <SignedOut>
+          <Link href="/login" className="login-button" onClick={closeMenu}>
+            <span className="button-text">Login</span>
+          </Link>
+        </SignedOut>
+        <SignedIn>
+          <UserButton afterSignOutUrl="/" />
+        </SignedIn>
       </nav>
 
       <div className={`overlay ${menuOpen ? 'active' : ''}`} onClick={closeMenu}></div>
