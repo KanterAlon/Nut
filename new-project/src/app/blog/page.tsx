@@ -1,7 +1,5 @@
-export default function BlogPage() {
-  return (
-    <main className="blog-page">
-      <h1>Blog</h1>
-    </main>
-  );
+import BlogPage from '@/components/BlogPage';
+
+export default function Blog() {
+  return <BlogPage />;
 }
