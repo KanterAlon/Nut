@@ -2,21 +2,21 @@
 
 const cards = [
   {
-    img: 'https://via.placeholder.com/300x200?text=Comparador',
+    img: '/img/imgCard1.png',
     title: 'Comparador de alimentos y bebidas',
     desc: 'Compara de manera visual y rápida el valor nutricional...',
     href: '/index',
     btn: 'Pruébalo Ahora',
   },
   {
-    img: 'https://via.placeholder.com/300x200?text=Comunidad',
+    img: '/img/imgCard2.png',
     title: 'Interactuá con usuarios de intereses similares',
     desc: 'Conectate con personas que comparten tus metas...',
     href: '/community',
     btn: 'Ir a comunidad',
   },
   {
-    img: 'https://via.placeholder.com/300x200?text=Blog',
+    img: '/img/imgCard3.png',
     title: 'Aprendé sobre diversos temas de nutrición',
     desc: 'Explorá artículos creados por nuestro equipo...',
     href: '/blog',
