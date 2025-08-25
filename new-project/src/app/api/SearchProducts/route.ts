@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import axios from 'axios';
+import axios, { type AxiosRequestConfig } from 'axios';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import type { Agent } from 'https';
 import { readCache, writeCache } from '@/lib/cache';
@@ -40,10 +40,10 @@ export async function GET(req: NextRequest) {
     };
 
       const agentUrl = process.env.https_proxy || process.env.HTTPS_PROXY;
-      const options: { params: typeof searchParams; proxy?: boolean; httpsAgent?: Agent } = { params: searchParams };
+      const options: AxiosRequestConfig = { params: searchParams };
       if (agentUrl) {
         options.proxy = false;
-        options.httpsAgent = new HttpsProxyAgent(agentUrl);
+        options.httpsAgent = new HttpsProxyAgent(agentUrl) as Agent;
       }
 
       interface OffProductRaw { code: string; product_name: string; image_url: string }

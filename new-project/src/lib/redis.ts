@@ -4,9 +4,11 @@ let redis: Redis | undefined;
 let redisUrl = process.env.REDIS_URL || process.env.UPSTASH_REDIS_URL;
 
 if (!redisUrl && process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) {
-  const url = new URL(process.env.UPSTASH_REDIS_REST_URL.replace(/^https?:\/\//, 'rediss://'));
+  const url = new URL(
+    process.env.UPSTASH_REDIS_REST_URL.replace(/^https?:\/\//, 'rediss://')
+  );
   url.username = 'default';
-  url.password = process.env.UPSTASH_REST_TOKEN;
+  url.password = process.env.UPSTASH_REDIS_REST_TOKEN;
   redisUrl = url.toString();
 }
 
