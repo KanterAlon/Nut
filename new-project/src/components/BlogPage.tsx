@@ -19,6 +19,11 @@ export default function BlogPage() {
       try {
         const apiBase = process.env.NEXT_PUBLIC_API_URL || '';
         const res = await fetch(`${apiBase}/api/blog`);
+
+        if (!res.ok) {
+          throw new Error(`Error al obtener posts: ${res.status}`);
+        }
+
         const data = await res.json();
         setPosts(data);
       } catch (err) {
