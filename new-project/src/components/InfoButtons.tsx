@@ -1,10 +1,10 @@
 'use client';
 
 const data = [
-  { img: 'https://via.placeholder.com/40', text: 'Ingresás que querés comer' },
-  { img: 'https://via.placeholder.com/40', text: 'Obtenés feedback nutricional rápido' },
-  { img: 'https://via.placeholder.com/40', text: 'Te informás íntegramente con facilidad' },
-  { img: 'https://via.placeholder.com/40', text: 'Te ayudamos a tomar una decisión' },
+  { img: '/img/icon_food.svg', text: 'Ingresás que querés comer' },
+  { img: '/img/icon_highlight.svg', text: 'Obtenés feedback nutricional rápido' },
+  { img: '/img/icon_healthy-eating.svg', text: 'Te informás íntegramente con facilidad' },
+  { img: '/img/icon_order-completed.svg', text: 'Te ayudamos a tomar una decisión' },
 ];
 
 export default function InfoButtons() {

@@ -5,7 +5,7 @@ export default function ContactSection() {
     <section className="contact-section">
       <div className="contact-inner">
         <div className="contact-image">
-          <img src="https://via.placeholder.com/400x300" alt="Contacto" />
+          <img src="/img/img_contact.svg" alt="Contacto" />
         </div>
         <div className="contact-content">
           <h2 style={{ color: 'var(--primary-color)' }}>¿Te quedó alguna inquietud?</h2>

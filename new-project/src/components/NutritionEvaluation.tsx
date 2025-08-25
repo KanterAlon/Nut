@@ -7,7 +7,7 @@ export default function NutritionEvaluation() {
         <div className="product-info">
           <div className="img-rating">
             <img
-              src="https://via.placeholder.com/225"
+              src="/img/img_lechealmendras.png"
               alt="Producto"
               className="product-image"
             />
@@ -18,15 +18,15 @@ export default function NutritionEvaluation() {
           </div>
           <div className="nutrition-details">
             <div className="nutrition-detail">
-              <img src="https://via.placeholder.com/25" alt="Alto en grasas" />
+              <img src="/img/icon_fat.svg" alt="Alto en grasas" />
               <span>Alto en Grasas</span>
             </div>
             <div className="nutrition-detail">
-              <img src="https://via.placeholder.com/25" alt="Alto en calorías" />
+              <img src="/img/icon_calories.svg" alt="Alto en calorías" />
               <span>Alto en Calorías</span>
             </div>
             <div className="nutrition-detail">
-              <img src="https://via.placeholder.com/25" alt="Bajas proteínas" />
+              <img src="/img/icon_proteins.svg" alt="Bajas proteínas" />
               <span>Bajas Proteínas</span>
             </div>
           </div>
