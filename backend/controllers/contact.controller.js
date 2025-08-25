@@ -14,7 +14,7 @@ const sendContactEmail = async (req, res) => {
     await transporter.sendMail({
       from: `${name} <${email}>`,
       to: 'wearezeta.contacto@gmail.com',
-      subject: `Contacto desde Zeta - ${reason}`,
+      subject: `Contacto desde Nut - ${reason}`,
       html: `
         <p><strong>Nombre:</strong> ${name}</p>
         <p><strong>Email:</strong> ${email}</p>

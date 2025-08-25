@@ -34,7 +34,7 @@ app.use(cors({
 app.use(express.json());
 
 app.use(session({
-  secret: 'zeta_secret',
+  secret: 'nut_secret',
   resave: false,
   saveUninitialized: false,
   cookie: {
