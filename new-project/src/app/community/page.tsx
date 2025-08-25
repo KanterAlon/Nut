@@ -31,12 +31,10 @@ export default function CommunityPage() {
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
-
   const fetchPosts = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${apiUrl}/api/obtenerPosts`, { credentials: 'include' });
+      const res = await fetch('/api/obtenerPosts', { credentials: 'include' });
       const data = await res.json();
       if (data.success) {
         const mapped: Post[] = data.posts.map((post: ApiPost) => ({
@@ -56,17 +54,17 @@ export default function CommunityPage() {
     } finally {
       setLoading(false);
     }
-  }, [apiUrl]);
+  }, []);
 
   const checkAuth = useCallback(async () => {
     try {
-      const res = await fetch(`${apiUrl}/api/auth`, { credentials: 'include' });
+      const res = await fetch('/api/auth', { credentials: 'include' });
       const data = await res.json();
       setAuth(data);
     } catch (err) {
       console.error('Error al verificar sesión:', err);
     }
-  }, [apiUrl]);
+  }, []);
 
   useEffect(() => {
     fetchPosts();
@@ -95,7 +93,7 @@ export default function CommunityPage() {
       })
     );
     try {
-      await fetch(`${apiUrl}/api/darLike`, {
+      await fetch('/api/darLike', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -129,7 +127,7 @@ export default function CommunityPage() {
       })
     );
     try {
-      await fetch(`${apiUrl}/api/darDislike`, {
+      await fetch('/api/darDislike', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -170,7 +168,7 @@ export default function CommunityPage() {
         }
       }
 
-      await fetch(`${apiUrl}/api/publicarPost`, {
+      await fetch('/api/publicarPost', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
