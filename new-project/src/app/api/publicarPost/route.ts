@@ -4,8 +4,9 @@ import { supabase } from '@/lib/supabaseClient';
 export async function POST(req: Request) {
   const { contenidoPost, imagenUrl } = await req.json();
 
+  // The Posts table uses an uppercase name in the database.
   const { error } = await supabase
-    .from('posts')
+    .from('Posts')
     .insert({
       contenido_post: contenidoPost,
       imagen_url: imagenUrl,

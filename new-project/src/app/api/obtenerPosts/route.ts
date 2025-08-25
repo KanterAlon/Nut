@@ -2,8 +2,10 @@ import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabaseClient';
 
 export async function GET() {
+  // The table was created with an uppercase name in PostgreSQL, so we
+  // need to reference it exactly as "Posts" when using Supabase.
   const { data, error } = await supabase
-    .from('posts')
+    .from('Posts')
     .select('id_post, contenido_post, fecha_creacion, imagen_url, likes, dislikes')
     .order('fecha_creacion', { ascending: false });
 

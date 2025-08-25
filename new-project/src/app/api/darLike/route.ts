@@ -4,8 +4,9 @@ import { supabase } from '@/lib/supabaseClient';
 export async function POST(req: Request) {
   const { idPost } = await req.json();
 
+  // The Posts table uses an uppercase name in the database.
   const { data, error } = await supabase
-    .from('posts')
+    .from('Posts')
     .select('likes')
     .eq('id_post', idPost)
     .single();
@@ -16,7 +17,7 @@ export async function POST(req: Request) {
 
   const likes = (data?.likes ?? 0) + 1;
   const { error: updateError } = await supabase
-    .from('posts')
+    .from('Posts')
     .update({ likes })
     .eq('id_post', idPost);
 
