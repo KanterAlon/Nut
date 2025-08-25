@@ -1,38 +1,20 @@
-import redis from './redis';
-
 const CACHE_THRESHOLD = parseInt(process.env.CACHE_THRESHOLD || '3', 10);
-const CACHE_TTL = 86400; // 24 hours
+const CACHE_TTL = 86400 * 1000; // 24 horas en ms
+
+const store = new Map<string, { value: unknown; expires: number }>();
+const freqMap = new Map<string, number>();
 
 export async function readCache(key: string) {
-  if (!redis) {
-    return { data: null, source: 'openfoodfacts', freq: 0 } as const;
+  const freq = (freqMap.get(key) ?? 0) + 1;
+  freqMap.set(key, freq);
+  const entry = store.get(key);
+  if (entry && entry.expires > Date.now()) {
+    return { data: entry.value, source: 'cache', freq } as const;
   }
-  const freqKey = `freq:${key}`;
-  try {
-    const freq = await redis.incr(freqKey);
-    if (freq === 1) await redis.expire(freqKey, CACHE_TTL);
-    console.log('📦 Revisando cache para', key);
-    const cached = await redis.get(key);
-    if (cached) {
-      console.log('✅ Cache hit para', key);
-      return { data: JSON.parse(cached), source: 'cache', freq } as const;
-    }
-    console.log('❌ Cache miss para', key);
-    return { data: null, source: 'openfoodfacts', freq } as const;
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error('Redis read error:', message);
-    return { data: null, source: 'openfoodfacts', freq: 0 } as const;
-  }
+  return { data: null, source: 'openfoodfacts', freq } as const;
 }
 
 export async function writeCache(key: string, value: unknown, freq: number) {
-  if (!redis || freq < CACHE_THRESHOLD) return;
-  try {
-    console.log('💾 Guardando en cache para', key);
-    await redis.setex(key, CACHE_TTL, JSON.stringify(value));
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error('Redis write error:', message);
-  }
+  if (freq < CACHE_THRESHOLD) return;
+  store.set(key, { value, expires: Date.now() + CACHE_TTL });
 }
