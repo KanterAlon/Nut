@@ -1,7 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import axios, { type AxiosRequestConfig } from 'axios';
-import { HttpsProxyAgent } from 'https-proxy-agent';
-import type { Agent } from 'https';
 import { readCache, writeCache } from '@/lib/cache';
 
 const OFF_SEARCH_URL = process.env.OPENFOODFACTS_SEARCH_URL || 'https://world.openfoodfacts.org/cgi/search.pl';
@@ -30,29 +27,24 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const searchParams = {
+    const searchParams = new URLSearchParams({
       search_terms: query,
-      page_size: 20,
+      page_size: '20',
       fields: 'code,product_name,image_url',
-      search_simple: 1,
+      search_simple: '1',
       action: 'process',
-      json: 1,
-    };
+      json: '1',
+    });
 
-      const agentUrl = process.env.https_proxy || process.env.HTTPS_PROXY;
-      const options: AxiosRequestConfig = { params: searchParams };
-      if (agentUrl) {
-        options.proxy = false;
-        options.httpsAgent = new HttpsProxyAgent(agentUrl) as Agent;
-      }
+    interface OffProductRaw { code: string; product_name: string; image_url: string }
+    interface OffResponse { products: OffProductRaw[] }
+    const res = await fetch(`${OFF_SEARCH_URL}?${searchParams}`);
+    if (!res.ok) throw new Error(`status ${res.status}`);
+    const result: OffResponse = await res.json();
 
-      interface OffProductRaw { code: string; product_name: string; image_url: string }
-      interface OffResponse { products: OffProductRaw[] }
-      const result = await axios.get<OffResponse>(OFF_SEARCH_URL, options);
-
-      const productos = (result.data.products || [])
-        .filter((p) => p.product_name && p.image_url && p.code)
-        .map((p) => ({ code: p.code, name: p.product_name.trim(), image: p.image_url }));
+    const productos = (result.products || [])
+      .filter((p) => p.product_name && p.image_url && p.code)
+      .map((p) => ({ code: p.code, name: p.product_name.trim(), image: p.image_url }));
 
     const map = new Map<string, { code: string; name: string; images: string[] }>();
     for (const prod of productos) {
