@@ -1,0 +1,673 @@
+:root {
+  --primary-color: #788A55;
+  --secondary1-color: #D9C86D;
+  --secondary2-color: #4D4D4D;
+  --secondary3-color: #f4f1e9;
+  --secondary4-color: #A7A297;
+  --secondary5-color: #e0e0e0;
+  --secondary6-color: #E8E8E8;
+  --whiteback-color: #ffffff;
+  --info-color: #42B2E0;
+  --success-color: #42B285;
+  --warning-color: #E0B248;
+  --error-color: #ff000d;
+
+  /* Typography Variables */
+  --font-family-heading: 'Codec Pro', sans-serif;
+  --font-family-body: 'Codec Pro', sans-serif;
+  --font-family-button: 'TT Norms', sans-serif;
+
+  --heading1-size: clamp(2rem, 5vw + 1rem, 3rem);
+  --heading1-weight: 700;
+  --heading1-line-height: 1.2;
+
+  --heading2-size: clamp(1.75rem, 4vw + 0.5rem, 2.25rem);
+  --heading2-weight: 700;
+  --heading2-line-height: 1.2;
+
+  --heading3-size: clamp(1.25rem, 3vw + 0.5rem, 1.75rem);
+  --heading3-weight: 400;
+  --heading3-line-height: 1.3;
+
+  --body-text-size: clamp(0.95rem, 2vw + 0.5rem, 1rem);
+  --body-text-weight: 400;
+  --body-text-line-height: 1.5;
+
+  --button-text-size: clamp(0.9rem, 2vw + 0.5rem, 1rem);
+  --button-text-weight: 400;
+  --button-text-line-height: 1.2;
+
+  --small-text-size: clamp(0.75rem, 2vw + 0.3rem, 0.875rem);
+  --small-text-weight: 400;
+  --small-text-line-height: 1.4;
+
+  --placeholder-text-size: clamp(0.9rem, 2vw + 0.5rem, 1rem);
+  --placeholder-text-weight: 400;
+  --placeholder-text-line-height: 1.2;
+  --placeholder-text-color: #A7A297;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+body {
+  background-color: var(--secondary3-color);
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-family-body);
+}
+
+h1, h2, h3, h4, p, button, a, label {
+  margin: 0;
+  padding: 0;
+}
+
+h1 {
+  font-family: var(--font-family-heading);
+  font-size: var(--heading1-size);
+  font-weight: var(--heading1-weight);
+  line-height: var(--heading1-line-height);
+  color: var(--secondary2-color);
+}
+
+h2 {
+  font-family: var(--font-family-heading);
+  font-size: var(--heading2-size);
+  font-weight: var(--heading2-weight);
+  line-height: var(--heading2-line-height);
+    color: var(--secondary2-color);
+
+}
+
+h3 {
+  font-family: var(--font-family-heading);
+  font-size: var(--heading3-size);
+  font-weight: var(--heading3-weight);
+  line-height: var(--heading3-line-height);
+    color: var(--secondary2-color);
+}
+
+p, span, a, label {
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-family-body);
+  font-size: var(--body-text-size);
+  font-weight: var(--body-text-weight);
+  line-height: var(--body-text-line-height);
+    color: var(--secondary2-color);
+}
+
+button {
+  font-size: var(--button-text-size);
+  font-weight: var(--button-text-weight);
+  line-height: var(--button-text-line-height);
+  font-family: var(--font-family-button);
+  background-color: transparent;
+  border: transparent;
+    color: var(--secondary2-color);
+}
+
+img,
+video {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+
+#root {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+main {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 72vh;
+}
+
+.index-main {
+  max-width: 1440px;
+}
+
+::placeholder {
+  font-size: var(--placeholder-text-size);
+  font-weight: var(--placeholder-text-weight);
+  line-height: var(--placeholder-text-line-height);
+  color: var(--placeholder-text-color);
+}
+
+.sec-nutrition-evaluation, .sec-funcionalidades, .sec-nutrition-lifestyle, .sec-advertisements-blog {
+  display: flex;
+  padding-top: 4rem;
+  justify-content: center;
+  align-items: center;
+}
+
+.sec-nutrition-lifestyle {
+  padding-block: 4rem;
+  padding-top: 0;
+}
+
+.back-button {
+  position: fixed;
+  top: 20px;
+  left: 20px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  z-index: 1000;
+}
+
+.back-button img {
+  width: 32px;
+  height: 32px;
+  transition: transform 0.3s ease;
+}
+
+/* Support SVG icons for back button */
+.back-button svg {
+  width: 32px;
+  height: 32px;
+  transition: transform 0.3s ease;
+}
+
+.back-button svg:hover {
+  transform: scale(1.1);
+}
+
+.back-button img:hover {
+  transform: scale(1.1);
+}
+
+section {
+  width: 100%;
+  padding-inline: 1rem;
+}
+
+@media (min-width: 768px) {
+  section {
+    padding-inline: 2rem;
+  }
+}
+
+
+
+
+/* Global loader style */
+.loader {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 2rem;
+}
+/* ------------------ HERO ------------------ */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 2rem;
+  gap: 2.5rem;
+}
+
+.inner {
+  width: 100%;
+  
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+
+.evaluation-content {
+  width: 90% !important;
+  background-color: var(--whiteback-color);
+  padding: 30px;
+  border-radius: 15px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  width: 100%;
+  max-width: 1100px;
+  min-height: 300px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-direction: column;
+  gap: 1.3rem;
+  text-align: center;
+}
+
+.evaluation-content h1 {
+  color: var(--primary-color);
+}
+
+.evaluation-content h3 {
+  color: var(--secondary2-color);
+}
+
+.search-wrapper {
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.search-bar {
+  display: flex;
+  align-items: center;
+  border: 2px solid var(--secondary4-color);
+  border-radius: 15px;
+  max-width: 950px;
+  width: 90%;
+  height: 60px;
+  padding-inline: 1.5rem;
+  position: relative;
+}
+
+.search-input {
+  border: none;
+  outline: none;
+  flex-grow: 1;
+  padding: 10px;
+  border-radius: 15px;
+  width: 100%;
+}
+
+.search-button {
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.search-icon-button {
+  margin-right: 0.5rem;
+}
+
+.camera-icon-button {
+  margin-left: 0.5rem;
+}
+
+.search-hint {
+  color: var(--secondary2-color);
+  font-size: 0.9rem;
+  margin-top: 0.3rem;
+}
+
+
+.search-button img {
+  width: 24px;
+  height: 24px;
+}
+
+/* Consistent sizing for icon components */
+.search-button svg {
+  width: 24px;
+  height: 24px;
+}
+
+.info-buttons {
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  margin-top: 2rem;
+  gap: 1rem;
+  margin-inline: auto;
+  flex-wrap: wrap;
+
+}
+
+.info-button {
+  background-color: var(--primary-color); /* Using --primary-color */
+  color: var(--secondary3-color);
+  border-radius: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 80%;
+  max-width: 300px;
+  text-align: left;
+  gap: 0.5rem;
+  height: 75px;
+  margin-inline: auto;
+}
+
+.info-button img {
+  width: 40px;
+  height: 40px;
+}
+
+.info-button span {
+  font-size: var(--body-text-size);
+  font-weight: var(--body-text-weight);
+  width: 190px;
+  color: var(--whiteback-color);
+}
+
+.search-bar form {
+  flex: 1;
+  display: flex;
+  justify-content: start;
+}
+
+/* .autocomplete-results {
+  display: none;
+  border: 1px solid #ddd;
+  background-color: #fff;
+  min-height: 200px;
+  max-height: 500px;
+  overflow-y: scroll;
+  position: absolute;
+  width: 100%;
+  top: 100%;
+  left: 0;
+  z-index: 100;
+  border-radius: 15px;
+  flex-direction: column;
+}
+
+.autocomplete-item {
+  padding: 10px;
+  cursor: pointer;
+  border-bottom: 1px solid #ddd;
+  height: 100px;
+}
+
+.autocomplete-item:hover {
+  background-color: #f0f0f0;
+} */
+
+.loader {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+}
+
+/* ------------------ NUTRITION EVALUATION ------------------ */
+
+.sec-nutrition-evaluation {
+  display: flex;
+  padding-block: 4rem;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+}
+
+.nutrition-evaluation-inner {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2rem;
+  width: 100%;
+}
+
+.nutrition-evaluation {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 2rem;
+  border-radius: 15px;
+}
+
+.img-rating {
+  position: relative;
+}
+
+.product-info {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 2rem;
+  position: relative;
+}
+
+.product-image {
+  width: 225px;
+  height: auto;
+}
+
+.rating {
+  position: absolute;
+  top: -20px;
+  right: -40px;
+  background-color: var(--secondary5-color);
+  border-radius: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1.12rem;
+  width: 225px;
+  height: 60px;
+}
+
+.circle {
+  width: 35px;
+  height: 35px;
+  border-radius: 50%;
+}
+
+.red {
+  background-color: var(--error-color);
+}
+
+.nutrition-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+.nutrition-detail {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.8rem;
+  background-color: var(--secondary5-color);
+  border-radius: 0 10px 10px 10px;
+  height: 49px;
+  width: 178px;
+}
+
+.nutrition-detail img {
+  width: 25px;
+  height: 25px;
+}
+
+.nutritional-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  align-self: flex-start;
+  max-width: 500px;
+}
+
+.nutritional-info h2, .nutritional-info p {
+  color: var(--secondary2-color);
+}
+
+@media (max-width: 768px) {
+  .nutrition-evaluation-inner {
+    flex-direction: column;
+    text-align: center;
+  }
+
+  .product-info {
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .rating {
+    position: static;
+    margin-top: 1rem;
+  }
+}
+
+/* ------------------ FUNCIONALIDADES ------------------ */
+
+.funcionalidades-inner, .advertisements-blog-inner {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  width: 100%;
+  gap: 1rem;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.cards-container {
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 1rem;
+}
+
+.card-funcionalidad, .card-advertisement-blog {
+  background-color: var(--whiteback-color);
+  border-radius: 17px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  text-align: center;
+  flex: 1 1 300px;
+  max-width: 400px;
+  min-height: 500px;
+  gap: .5rem;
+  padding-bottom: 1.5rem;
+  margin: 0.5rem;
+}
+
+.contenedor-imagen-card-funcionalidad, .contenedor-imagen-card-blog {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 230px;
+}
+
+.contenedor-imagen-card-funcionalidad img {
+  width: 100%;
+  max-height: 100%;
+}
+
+.titulo-card-funcionalidad, .descripcion-card-funcionalidad {
+  color: var(--secondary2-color);
+}
+
+.funcionalidades-inner h2 {
+  color: var(--secondary2-color);
+}
+
+.card-funcionalidad h3, .card-funcionalidad p {
+  width: 89%;
+  margin: 0 auto;
+}
+
+.button-card {
+  background-color: var(--primary-color);
+  width: 89%;
+  height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  text-decoration: none;
+  color: var(--whiteback-color);
+  border-radius: 4px;
+}
+
+.button-card:hover {
+  color: var(--whiteback-color);
+  transform: scale(1.01);
+}
+
+@media (max-width: 768px) {
+  .cards-container {
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .card-funcionalidad, .card-advertisement-blog {
+    max-width: 90%;
+  }
+}
+
+/* ------------------ CONTACT SECTION ------------------ */
+
+.contact-section {
+  background-color: var(--secondary3-color);
+  padding-top: 1.5rem;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.contact-inner {
+  display: flex;
+  align-items: center;
+  gap: 8rem; /* Increased gap for more space between image and text/button */
+  max-width: 1100px;
+  width: 100%;
+}
+
+.contact-image {
+  flex-shrink: 0;
+}
+
+.contact-image img {
+  width: 300px;
+  height: auto;
+}
+
+.contact-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem; /* Gap between heading, subheading, and button */
+}
+
+.contact-content h1 {
+  font-family: var(--font-family-heading);
+  font-size: var(--heading1-size);
+  color: var(--primary-color);
+}
+
+.contact-content h3 {
+  font-family: var(--font-family-body);
+  font-size: var(--heading3-size);
+  color: var(--secondary2-color);
+}
+
+.contact-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 9rem;
+  height: 3rem;
+  background-color: var(--primary-color);
+  text-decoration: none;
+  border-radius: 8px;
+  text-align: center;
+  color: var(--whiteback-color);
+}
+
+.contact-button span {
+  font-size: var(--button-text-size);
+  color: var(--whiteback-color);
+  margin: 0;
+}
+
