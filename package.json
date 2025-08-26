@@ -3,19 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "predev": "prisma generate",
     "dev": "next dev --turbopack",
-    "prebuild": "prisma generate",
     "build": "next build --turbopack",
-    "prestart": "prisma generate",
     "start": "next start",
-    "lint": "eslint",
-    "postinstall": "prisma generate"
+    "lint": "eslint"
   },
   "dependencies": {
     "@clerk/nextjs": "^6.31.4",
     "@upstash/redis": "^1.32.0",
-    "@prisma/client": "^6.10.1",
+    "@supabase/ssr": "^0.7.0",
+    "@supabase/supabase-js": "^2.56.0",
     "next": "15.5.0",
     "nodemailer": "^6.9.12",
     "react": "19.1.0",
@@ -31,7 +28,6 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "15.5.0",
-    "prisma": "^6.10.1",
     "typescript": "^5"
   }
 }

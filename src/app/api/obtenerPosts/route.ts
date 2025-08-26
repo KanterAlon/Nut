@@ -1,39 +1,50 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { createClient } from '@/utils/supabase/server';
 import { getAuthedUser } from '@/lib/auth';
+
+interface Interaccion {
+  id_usuario: number;
+  tipo_interaccion: number;
+}
+
+interface PostRecord {
+  id_post: number;
+  contenido_post: string;
+  fecha_creacion: string;
+  imagen_url: string | null;
+  usuario: { nombre: string | null } | null;
+  interacciones: Interaccion[] | null;
+}
 
 export async function GET() {
   try {
-    const data = await prisma.posts.findMany({
-      where: {
-        NOT: { id_usuario: 1 },
-      },
-      orderBy: { fecha_creacion: 'desc' },
-      include: {
-        usuario: { select: { nombre: true } },
-        interacciones: {
-          select: { id_usuario: true, tipo_interaccion: true },
-        },
-      },
-    });
-
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from('posts')
+      .select(
+        `id_post, contenido_post, fecha_creacion, imagen_url,
+         usuario:usuarios(nombre),
+         interacciones(id_usuario, tipo_interaccion)`
+      )
+      .neq('id_usuario', 1)
+      .order('fecha_creacion', { ascending: false });
+    if (error) throw error;
 
     const user = await getAuthedUser();
     const idUsuario = user?.id_usuario ?? null;
-    const posts = data.map((post) => {
-      const likes = post.interacciones.filter((i) => i.tipo_interaccion === 1);
-      const dislikes = post.interacciones.filter((i) => i.tipo_interaccion === 2);
-
+    const posts = ((data as PostRecord[] | null) ?? []).map((post) => {
+      const likes = (post.interacciones ?? []).filter(i => i.tipo_interaccion === 1);
+      const dislikes = (post.interacciones ?? []).filter(i => i.tipo_interaccion === 2);
       return {
         id_post: post.id_post,
         contenido_post: post.contenido_post,
-        fecha_creacion: post.fecha_creacion.toISOString(),
+        fecha_creacion: post.fecha_creacion,
         autor: post.usuario?.nombre ?? 'Usuario',
         imagen_url: post.imagen_url,
         likes: likes.length,
         dislikes: dislikes.length,
-        liked: idUsuario ? likes.some((i) => i.id_usuario === idUsuario) : false,
-        disliked: idUsuario ? dislikes.some((i) => i.id_usuario === idUsuario) : false,
+        liked: idUsuario ? likes.some(i => i.id_usuario === idUsuario) : false,
+        disliked: idUsuario ? dislikes.some(i => i.id_usuario === idUsuario) : false,
       };
     });
 

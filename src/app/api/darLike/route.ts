@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { createClient } from '@/utils/supabase/server';
 import { getAuthedUser } from '@/lib/auth';
-
 
 export async function POST(req: Request) {
   const { idPost } = await req.json();
@@ -16,27 +15,31 @@ export async function POST(req: Request) {
   const idUsuario = user.id_usuario;
 
   try {
-    const existente = await prisma.interacciones.findFirst({
-      where: { id_post: idPost, id_usuario: idUsuario },
-    });
+    const supabase = await createClient();
+    const { data: existente } = await supabase
+      .from('interacciones')
+      .select('id_interaccion, tipo_interaccion')
+      .eq('id_post', idPost)
+      .eq('id_usuario', idUsuario)
+      .maybeSingle();
 
     if (existente?.tipo_interaccion === 1) {
-      await prisma.interacciones.delete({
-        where: { id_interaccion: existente.id_interaccion },
-      });
+      await supabase
+        .from('interacciones')
+        .delete()
+        .eq('id_interaccion', existente.id_interaccion);
     } else {
       if (existente) {
-        await prisma.interacciones.delete({
-          where: { id_interaccion: existente.id_interaccion },
-        });
+        await supabase
+          .from('interacciones')
+          .delete()
+          .eq('id_interaccion', existente.id_interaccion);
       }
-      await prisma.interacciones.create({
-        data: {
-          id_post: idPost,
-          id_usuario: idUsuario,
-          tipo_interaccion: 1,
-          fecha_interaccion: new Date(),
-        },
+      await supabase.from('interacciones').insert({
+        id_post: idPost,
+        id_usuario: idUsuario,
+        tipo_interaccion: 1,
+        fecha_interaccion: new Date().toISOString(),
       });
     }
 

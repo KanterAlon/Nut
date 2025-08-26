@@ -1,12 +1,9 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-
+import { createClient } from '@/utils/supabase/server';
 import { getAuthedUser } from '@/lib/auth';
-
 
 export async function POST(req: Request) {
   const { contenidoPost, imagenUrl } = await req.json();
-
 
   const user = await getAuthedUser();
   if (!user) {
@@ -17,20 +14,25 @@ export async function POST(req: Request) {
   }
 
   try {
-    const nuevo = await prisma.posts.create({
-      data: {
+    const supabase = await createClient();
+    const { data: nuevo, error } = await supabase
+      .from('posts')
+      .insert({
         contenido_post: contenidoPost,
         imagen_url: imagenUrl,
         id_usuario: user.id_usuario,
-        fecha_creacion: new Date(),
-      },
-    });
+        fecha_creacion: new Date().toISOString(),
+      })
+      .select('id_post, contenido_post, fecha_creacion, imagen_url')
+      .single();
+    if (error) throw error;
+
     return NextResponse.json({
       success: true,
       post: {
         id_post: nuevo.id_post,
         contenido_post: nuevo.contenido_post,
-        fecha_creacion: nuevo.fecha_creacion.toISOString(),
+        fecha_creacion: nuevo.fecha_creacion,
         autor: user.nombre,
         imagen_url: nuevo.imagen_url,
       },

@@ -1,10 +1,10 @@
 import { currentUser } from '@clerk/nextjs/server';
-import { prisma } from './prisma';
+import { createClient } from '@/utils/supabase/server';
 
 /**
- * Obtains the authenticated user from Clerk and ensures
- * a corresponding record exists in the database.
- * Returns the Prisma user or null if unauthenticated.
+ * Obtains the authenticated user from Clerk and ensures a corresponding
+ * record exists in the database. Returns the Supabase user or null if
+ * unauthenticated.
  */
 export async function getAuthedUser() {
   const user = await currentUser();
@@ -13,15 +13,27 @@ export async function getAuthedUser() {
   const email = user.emailAddresses[0]?.emailAddress;
   if (!email) return null;
 
-  let dbUser = await prisma.usuarios.findUnique({ where: { email } });
-  if (!dbUser) {
-    dbUser = await prisma.usuarios.create({
-      data: {
+  const supabase = await createClient();
+  const { data: existing, error } = await supabase
+    .from('usuarios')
+    .select('*')
+    .eq('email', email)
+    .maybeSingle();
+  if (error) throw error;
+
+  if (!existing) {
+    const { data: newUser, error: insertError } = await supabase
+      .from('usuarios')
+      .insert({
         nombre: user.firstName || 'Usuario',
         email,
-        fecha_registro: new Date(),
-      },
-    });
+        fecha_registro: new Date().toISOString(),
+      })
+      .select()
+      .single();
+    if (insertError) throw insertError;
+    return newUser;
   }
-  return dbUser;
+
+  return existing;
 }
