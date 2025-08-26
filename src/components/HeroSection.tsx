@@ -47,8 +47,27 @@ export default function HeroSection() {
         method: 'POST',
         body: formData,
       });
-      const data = await res.json();
-      const term = data.ai?.response?.trim();
+      if (!res.body) throw new Error('No response body');
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let bufferStr = '';
+      let term = '';
+      while (!term) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        bufferStr += decoder.decode(value, { stream: true });
+        const lines = bufferStr.split('\n');
+        bufferStr = lines.pop() || '';
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const json = JSON.parse(line);
+          if (json.type === 'product' && !term) {
+            term = json.title || json.aiResponse || '';
+            await reader.cancel();
+            break;
+          }
+        }
+      }
       if (term) {
         router.push(`/search?query=${encodeURIComponent(term)}`);
       }
