@@ -1,27 +1,40 @@
-# Node
-node_modules
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
-# Build outputs
-build
-dist
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
 
-# IDE files
-.idea
-.vscode
+# testing
+/coverage
 
-# Prisma generated
-.prisma
-backend/prisma/migrations
+# next.js
+/.next/
+/out/
 
-# Logs
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+.pnpm-debug.log*
 
-# Sensitive environment variables
-backend/.env.secrets
-backend/.env.local
-backend/credentials/google-vision.json
+# env files
 
-# Example folder no longer used
-clerk-react/
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts

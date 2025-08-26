@@ -1,85 +1,36 @@
-# Nut
+This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
-## Environment configuration
+## Getting Started
 
-## Comando para evitar problema del firewall: set NODE_TLS_REJECT_UNAUTHORIZED=0
-
-The project uses two environment files inside the `backend` folder:
-
-- `.env` contains public configuration (including a `DATABASE_URL` built from
-  `SUPABASE_DB_USER` and `SUPABASE_DB_PASSWORD`) and **is committed** to the repository.
-- `.env.secrets` holds sensitive keys like database credentials, the OpenAI API key and the Google Vision credentials path. This file is ignored by Git. Use `.env.secrets.example` as a template. It also stores the Gmail credentials required for the contact form.
-
-Copy the example files before running the project:
-
-```bash
-cp backend/.env.secrets.example backend/.env.secrets
-cp frontend/.env.example frontend/.env
-```
-
-The frontend keeps its own public variables in `frontend/.env`. A sample file is provided at `frontend/.env.example`.
-Add `VITE_IMGBB_KEY` with your imgbb API key to enable image uploads for
-community posts. If the key is missing, posts will still be created but
-any selected images will be ignored.
-
-## Development
-
-Install dependencies for both the backend and frontend using npm workspaces:
-
-```bash
-npm install
-```
-
-Then start the application:
+First, run the development server:
 
 ```bash
 npm run dev
+# or
+yarn dev
+# or
+pnpm dev
+# or
+bun dev
 ```
 
-This will run the backend server and the Vite frontend concurrently.
+Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-Run `npm run lint` to check the frontend code with ESLint.
+You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
-## Prisma
+This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
-Use Prisma to interact with the database. The CLI looks for the schema at
-`backend/prisma/schema.prisma`, so you can run commands from the repository root
-or inside the `backend` folder.
+## Learn More
 
-Introspect the existing database with:
+To learn more about Next.js, take a look at the following resources:
 
-```bash
-npm run db:pull
-```
+- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
+- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
 
-The script loads `.env.secrets` before `.env` so Prisma receives a connection
-string like:
+You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
 
-```
-postgresql://${SUPABASE_DB_USER}:${SUPABASE_DB_PASSWORD}@${SUPABASE_DB_HOST}:6543/postgres?pgbouncer=true
-```
+## Deploy on Vercel
 
-`SUPABASE_DB_HOST` defaults to Supabase's IPv4 connection pool
-(`aws-0-us-east-2.pooler.supabase.com`), which avoids IPv6-only hosts that can
-cause P1001 errors on machines without IPv6 connectivity. Adjust the host to
-match your project's region if needed. Edit `backend/.env.secrets` to provide
-your Supabase user and password.
+The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
-## Product cache
-
-The backend uses [Upstash Redis](https://upstash.com/) to cache both product
-search results and individual product details. The cache is smarter now:
-
-1. **Normalized keys:** search terms are normalized (accents, spaces and
-   punctuation removed) so variations like `oreo`, `oreoo` or `oreo-` share the
-   same cache entry.
-2. **Frequency-based storage:** each normalized query increments a counter. Only
-   when a query or product is requested repeatedly (default threshold: `3`)
-   does the server store the result in Redis (`SETEX`, 24h).
-3. **Product details:** requests to the product endpoint also benefit from this
-   mechanism, caching the product information itself under `product:<query>`.
-4. If `REDIS_URL` is not set or Redis is unavailable, the server skips caching
-   and logs that Redis is disabled.
-
-This approach avoids storing rarely used data and prevents duplicate entries for
-similar product names.
+Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
