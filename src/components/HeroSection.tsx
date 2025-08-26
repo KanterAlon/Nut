@@ -42,7 +42,8 @@ export default function HeroSection() {
     formData.append('image', file, 'capture.jpg');
     try {
       setLoading(true);
-      const res = await fetch('http://localhost:3000/api/camera/upload', {
+      const apiBase = process.env.NEXT_PUBLIC_API_URL || '';
+      const res = await fetch(`${apiBase}/api/camera/upload`, {
         method: 'POST',
         body: formData,
       });
