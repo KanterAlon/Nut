@@ -17,7 +17,7 @@ export async function POST(req: Request) {
   try {
     const supabase = await createClient();
     const { data: existente } = await supabase
-      .from('interacciones')
+      .from('Interacciones')
       .select('id_interaccion, tipo_interaccion')
       .eq('id_post', idPost)
       .eq('id_usuario', idUsuario)
@@ -25,17 +25,17 @@ export async function POST(req: Request) {
 
     if (existente?.tipo_interaccion === 2) {
       await supabase
-        .from('interacciones')
+        .from('Interacciones')
         .delete()
         .eq('id_interaccion', existente.id_interaccion);
     } else {
       if (existente) {
         await supabase
-          .from('interacciones')
+          .from('Interacciones')
           .delete()
           .eq('id_interaccion', existente.id_interaccion);
       }
-      await supabase.from('interacciones').insert({
+      await supabase.from('Interacciones').insert({
         id_post: idPost,
         id_usuario: idUsuario,
         tipo_interaccion: 2,

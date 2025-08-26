@@ -15,7 +15,7 @@ export async function getAuthedUser() {
 
   const supabase = await createClient();
   const { data: existing, error } = await supabase
-    .from('usuarios')
+    .from('Usuarios')
     .select('*')
     .eq('email', email)
     .maybeSingle();
@@ -23,7 +23,7 @@ export async function getAuthedUser() {
 
   if (!existing) {
     const { data: newUser, error: insertError } = await supabase
-      .from('usuarios')
+      .from('Usuarios')
       .insert({
         nombre: user.firstName || 'Usuario',
         email,

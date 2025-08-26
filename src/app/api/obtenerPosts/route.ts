@@ -20,11 +20,11 @@ export async function GET() {
   try {
     const supabase = await createClient();
     const { data, error } = await supabase
-      .from('posts')
+      .from('Posts')
       .select(
         `id_post, contenido_post, fecha_creacion, imagen_url,
-         usuario:usuarios(nombre),
-         interacciones(id_usuario, tipo_interaccion)`
+         usuario:Usuarios(nombre),
+         interacciones:Interacciones(id_usuario, tipo_interaccion)`
       )
       .neq('id_usuario', 1)
       .order('fecha_creacion', { ascending: false });

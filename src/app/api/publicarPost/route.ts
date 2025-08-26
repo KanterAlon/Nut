@@ -16,7 +16,7 @@ export async function POST(req: Request) {
   try {
     const supabase = await createClient();
     const { data: nuevo, error } = await supabase
-      .from('posts')
+      .from('Posts')
       .insert({
         contenido_post: contenidoPost,
         imagen_url: imagenUrl,
