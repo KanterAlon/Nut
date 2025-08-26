@@ -78,7 +78,10 @@ export default function ProductPage() {
     const isDev =
       process.env.NODE_ENV !== "production" || localStorage.getItem("devMode") === "true";
     fetch(`${apiBase}/api/product?query=${encodeURIComponent(query)}`)
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) throw new Error(`status ${res.status}`);
+        return res.json();
+      })
       .then((data) => {
         if (data.error) {
           setErrorMessage(data.error);
@@ -98,6 +101,7 @@ export default function ProductPage() {
         }
       })
       .catch(() => {
+        setProductData(null);
         setErrorMessage("Error al cargar el producto");
       });
   }, [query]);
