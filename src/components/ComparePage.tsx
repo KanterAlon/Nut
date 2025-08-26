@@ -123,7 +123,7 @@ export default function ComparePage() {
     },
   ];
 
-  const getValue = (obj: Record<string, unknown>, path: string[]) =>
+  const getValue = (obj: unknown, path: string[]): unknown =>
     path.reduce<unknown>((acc, key) => {
       if (typeof acc === 'object' && acc !== null && key in acc) {
         return (acc as Record<string, unknown>)[key];
@@ -164,7 +164,7 @@ export default function ComparePage() {
                     const hasData = val != null;
                     return (
                       <td key={i} className={hasData ? '' : 'no-data'}>
-                        {hasData ? val : 'Sin datos'}
+                        {hasData ? (val as React.ReactNode) : 'Sin datos'}
                       </td>
                     );
                   })}
