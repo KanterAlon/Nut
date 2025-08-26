@@ -45,12 +45,11 @@ export default function ComparePage() {
       return;
     }
     setLoading(true);
-    const apiBase =
-      process.env.NEXT_PUBLIC_API_URL || 'https://zeta-v2-backend.vercel.app';
+    const apiBase = process.env.NEXT_PUBLIC_API_URL || '';
     Promise.all(
       codes.map((c) =>
         fetch(`${apiBase}/api/product?query=${encodeURIComponent(c)}`)
-          .then((res) => res.json())
+          .then((res) => (res.ok ? res.json() : null))
           .catch(() => null),
       ),
     ).then((data) => {
