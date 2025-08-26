@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { getAuthedUser } from '@/lib/auth';
 
 export async function GET() {
   try {
@@ -9,14 +10,22 @@ export async function GET() {
       },
       orderBy: { fecha_creacion: 'desc' },
       include: {
+        usuario: { select: { nombre: true } },
         interacciones: {
           select: { id_usuario: true, tipo_interaccion: true },
         },
       },
     });
 
+
+    const user = await getAuthedUser();
+    const idUsuario = user?.id_usuario ?? null;
+
+
+
     // TODO: obtener el ID de usuario autenticado real
     const idUsuario = 1;
+
 
     const posts = data.map((post) => {
       const likes = post.interacciones.filter((i) => i.tipo_interaccion === 1);
@@ -26,11 +35,19 @@ export async function GET() {
         id_post: post.id_post,
         contenido_post: post.contenido_post,
         fecha_creacion: post.fecha_creacion.toISOString(),
+        autor: post.usuario?.nombre ?? 'Usuario',
+        imagen_url: post.imagen_url,
+        likes: likes.length,
+        dislikes: dislikes.length,
+        liked: idUsuario ? likes.some((i) => i.id_usuario === idUsuario) : false,
+        disliked: idUsuario ? dislikes.some((i) => i.id_usuario === idUsuario) : false,
+
         imagen_url: post.imagen_url,
         likes: likes.length,
         dislikes: dislikes.length,
         liked: likes.some((i) => i.id_usuario === idUsuario),
         disliked: dislikes.some((i) => i.id_usuario === idUsuario),
+
       };
     });
 

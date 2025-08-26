@@ -1,11 +1,18 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { getAuthedUser } from '@/lib/auth';
 
 export async function POST(req: Request) {
   const { idPost } = await req.json();
 
-  // TODO: obtener el ID de usuario autenticado real
-  const idUsuario = 1;
+  const user = await getAuthedUser();
+  if (!user) {
+    return NextResponse.json(
+      { success: false, message: 'Usuario no autenticado' },
+      { status: 401 }
+    );
+  }
+  const idUsuario = user.id_usuario;
 
   try {
     const existente = await prisma.interacciones.findFirst({
