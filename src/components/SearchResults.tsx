@@ -27,7 +27,7 @@ export default function SearchResults() {
     setLoading(true);
     const apiBase = process.env.NEXT_PUBLIC_API_URL || '';
     const start = performance.now();
-    const isDev = process.env.NODE_ENV !== 'production' || localStorage.getItem('devMode') === 'true';
+    const showAlerts = process.env.NEXT_PUBLIC_TIMING_ALERTS === 'true';
     fetch(`${apiBase}/api/SearchProducts?query=${encodeURIComponent(query)}`)
       .then((res) => {
         if (!res.ok) throw new Error(`status ${res.status}`);
@@ -38,7 +38,7 @@ export default function SearchResults() {
           setProducts(data.products);
           const elapsed = (performance.now() - start).toFixed(2);
           const source = data.source === 'cache' ? 'la cache' : 'OpenFoodFacts';
-          if (isDev) {
+          if (showAlerts) {
             setAlertMessage(`Resultados obtenidos de ${source} en ${elapsed} ms`);
           }
         } else {

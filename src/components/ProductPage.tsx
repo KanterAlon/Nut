@@ -75,8 +75,7 @@ export default function ProductPage() {
     if (!query) return;
     const apiBase = process.env.NEXT_PUBLIC_API_URL || "";
     const start = performance.now();
-    const isDev =
-      process.env.NODE_ENV !== "production" || localStorage.getItem("devMode") === "true";
+    const showAlerts = process.env.NEXT_PUBLIC_TIMING_ALERTS === "true";
     fetch(`${apiBase}/api/product?query=${encodeURIComponent(query)}`)
       .then((res) => {
         if (!res.ok) throw new Error(`status ${res.status}`);
@@ -89,7 +88,7 @@ export default function ProductPage() {
         } else {
           const elapsed = (performance.now() - start).toFixed(2);
           const source = data.source === "cache" ? "la cache" : "OpenFoodFacts";
-          if (isDev) {
+          if (showAlerts) {
             setAlertMessage(`Producto obtenido de ${source} en ${elapsed} ms`);
           }
           const { source: _SOURCE, elapsedTime: _ELAPSEDTIME, ...product } = data;
