@@ -1,4 +1,7 @@
 import type { NextConfig } from "next";
+import { config as loadEnv } from "dotenv";
+
+loadEnv({ path: ".env.local.secrets" });
 
 const nextConfig: NextConfig = {
   turbopack: {
