@@ -1,20 +1,21 @@
 import { NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabaseClient';
+import { prisma } from '@/lib/prisma';
 
 export async function POST(req: Request) {
   const { contenidoPost, imagenUrl } = await req.json();
 
-  // The Posts table uses an uppercase name in the database.
-  const { error } = await supabase
-    .from('Posts')
-    .insert({
-      contenido_post: contenidoPost,
-      imagen_url: imagenUrl,
+  try {
+    await prisma.posts.create({
+      data: {
+        contenido_post: contenidoPost,
+        imagen_url: imagenUrl,
+        id_usuario: 1, // TODO: obtener el ID real del usuario
+        fecha_creacion: new Date(),
+      },
     });
-
-  if (error) {
-    return NextResponse.json({ success: false, message: error.message }, { status: 500 });
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Error interno del servidor';
+    return NextResponse.json({ success: false, message }, { status: 500 });
   }
-
-  return NextResponse.json({ success: true });
 }
