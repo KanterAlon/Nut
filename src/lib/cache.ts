@@ -3,41 +3,46 @@ import { Redis } from '@upstash/redis';
 const CACHE_THRESHOLD = parseInt(process.env.CACHE_THRESHOLD || '3', 10);
 const CACHE_TTL_SECONDS = 60 * 60 * 24; // 24 horas
 
-// Inicializamos Redis desde las variables de entorno. Si falla la conexión
-// simplemente no se usará caché.
-let redis: Redis | null = null;
-try {
-  redis = Redis.fromEnv();
-} catch (err) {
-  console.error('Redis init error:', (err as Error).message);
+let redis: Redis | null | undefined;
+function getRedis(): Redis | null {
+  if (redis !== undefined) return redis;
+  try {
+    redis = Redis.fromEnv();
+  } catch (err) {
+    console.error('Redis init error:', (err as Error).message);
+    redis = null;
+  }
+  return redis;
 }
 
 export async function readCache(key: string) {
+  const client = getRedis();
   const freqKey = `freq:${key}`;
 
-  if (!redis) {
+  if (!client) {
     return { data: null, source: 'openfoodfacts', freq: 1 } as const;
   }
 
+  let freq = 1;
   try {
-    const freq = await redis.incr(freqKey);
-    if (freq === 1) await redis.expire(freqKey, CACHE_TTL_SECONDS);
-    const cached = await redis.get<unknown>(key);
+    freq = await client.incr(freqKey);
+    if (freq === 1) await client.expire(freqKey, CACHE_TTL_SECONDS);
+    const cached = await client.get<unknown>(key);
     if (cached !== null) {
       return { data: cached, source: 'cache', freq } as const;
     }
-    return { data: null, source: 'openfoodfacts', freq } as const;
   } catch (err) {
     console.error('Redis read error:', (err as Error).message);
-    return { data: null, source: 'openfoodfacts', freq: 1 } as const;
   }
+  return { data: null, source: 'openfoodfacts', freq } as const;
 }
 
 export async function writeCache(key: string, value: unknown, freq: number) {
-  if (freq < CACHE_THRESHOLD || !redis) return;
+  const client = getRedis();
+  if (freq < CACHE_THRESHOLD || !client) return;
 
   try {
-    await redis.set(key, value, { ex: CACHE_TTL_SECONDS });
+    await client.set(key, value, { ex: CACHE_TTL_SECONDS });
   } catch (err) {
     console.error('Redis write error:', (err as Error).message);
   }

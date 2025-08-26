@@ -34,7 +34,10 @@ export async function GET(req: NextRequest) {
   if (!product) {
     try {
       if (isEAN) {
-        const productRes = await fetch(`${OFF_PROD_URL}/${encodeURIComponent(query)}.json`);
+        const productRes = await fetch(
+          `${OFF_PROD_URL}/${encodeURIComponent(query)}.json`,
+          { cache: 'no-store' },
+        );
         if (!productRes.ok) throw new Error(`status ${productRes.status}`);
         const prodJson: { status: number; product: OffProduct } = await productRes.json();
         if (prodJson.status !== 1) {
@@ -48,7 +51,7 @@ export async function GET(req: NextRequest) {
           action: 'process',
           json: '1',
         });
-        const searchRes = await fetch(`${OFF_SEARCH_URL}?${searchParams}`);
+        const searchRes = await fetch(`${OFF_SEARCH_URL}?${searchParams}`, { cache: 'no-store' });
         if (!searchRes.ok) throw new Error(`status ${searchRes.status}`);
         const searchJson: { products?: OffProduct[] } = await searchRes.json();
         const productos = searchJson.products;

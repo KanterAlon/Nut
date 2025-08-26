@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
 
     interface OffProductRaw { code: string; product_name: string; image_url: string }
     interface OffResponse { products: OffProductRaw[] }
-    const res = await fetch(`${OFF_SEARCH_URL}?${searchParams}`);
+    const res = await fetch(`${OFF_SEARCH_URL}?${searchParams}`, { cache: 'no-store' });
     if (!res.ok) throw new Error(`status ${res.status}`);
     const result: OffResponse = await res.json();
 

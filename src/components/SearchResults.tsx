@@ -29,7 +29,10 @@ export default function SearchResults() {
     const start = performance.now();
     const isDev = process.env.NODE_ENV !== 'production' || localStorage.getItem('devMode') === 'true';
     fetch(`${apiBase}/api/SearchProducts?query=${encodeURIComponent(query)}`)
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) throw new Error(`status ${res.status}`);
+        return res.json();
+      })
       .then((data) => {
         if (data.success) {
           setProducts(data.products);
