@@ -102,11 +102,12 @@ export default function SearchResults() {
         <p className="no-results">No se encontraron productos.</p>
       ) : (
         <div className="cards-container">
-          {products.map((p) => {
+          {products.map((p, index) => {
             const isSelected = selected.includes(p.code);
+            const key = p.code ? `${p.code}-${index}` : index;
             return (
               <div
-                key={p.code}
+                key={key}
                 className={`product-card${isSelected ? ' selected' : ''}`}
                 onClick={() => handleClick(p)}
               >
