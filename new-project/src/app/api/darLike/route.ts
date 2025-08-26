@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getAuthedUser } from '@/lib/auth';
 
+
 export async function POST(req: Request) {
   const { idPost } = await req.json();
 
