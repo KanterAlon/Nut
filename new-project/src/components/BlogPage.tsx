@@ -25,7 +25,9 @@ export default function BlogPage() {
         }
 
         const data = await res.json();
-        setPosts(data);
+        if (data.success) {
+          setPosts(data.posts);
+        }
       } catch (err) {
         console.error('Error al obtener posts del blog:', err);
       } finally {
