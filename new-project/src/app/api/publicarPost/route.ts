@@ -1,20 +1,39 @@
 import { NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabaseClient';
+import { prisma } from '@/lib/prisma';
+import { getAuthedUser } from '@/lib/auth';
 
 export async function POST(req: Request) {
   const { contenidoPost, imagenUrl } = await req.json();
 
-  // The Posts table uses an uppercase name in the database.
-  const { error } = await supabase
-    .from('Posts')
-    .insert({
-      contenido_post: contenidoPost,
-      imagen_url: imagenUrl,
-    });
-
-  if (error) {
-    return NextResponse.json({ success: false, message: error.message }, { status: 500 });
+  const user = await getAuthedUser();
+  if (!user) {
+    return NextResponse.json(
+      { success: false, message: 'Usuario no autenticado' },
+      { status: 401 }
+    );
   }
 
-  return NextResponse.json({ success: true });
+  try {
+    const nuevo = await prisma.posts.create({
+      data: {
+        contenido_post: contenidoPost,
+        imagen_url: imagenUrl,
+        id_usuario: user.id_usuario,
+        fecha_creacion: new Date(),
+      },
+    });
+    return NextResponse.json({
+      success: true,
+      post: {
+        id_post: nuevo.id_post,
+        contenido_post: nuevo.contenido_post,
+        fecha_creacion: nuevo.fecha_creacion.toISOString(),
+        autor: user.nombre,
+        imagen_url: nuevo.imagen_url,
+      },
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Error interno del servidor';
+    return NextResponse.json({ success: false, message }, { status: 500 });
+  }
 }
