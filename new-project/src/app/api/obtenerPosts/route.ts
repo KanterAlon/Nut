@@ -20,13 +20,6 @@ export async function GET() {
 
     const user = await getAuthedUser();
     const idUsuario = user?.id_usuario ?? null;
-
-
-
-    // TODO: obtener el ID de usuario autenticado real
-    const idUsuario = 1;
-
-
     const posts = data.map((post) => {
       const likes = post.interacciones.filter((i) => i.tipo_interaccion === 1);
       const dislikes = post.interacciones.filter((i) => i.tipo_interaccion === 2);
@@ -41,13 +34,6 @@ export async function GET() {
         dislikes: dislikes.length,
         liked: idUsuario ? likes.some((i) => i.id_usuario === idUsuario) : false,
         disliked: idUsuario ? dislikes.some((i) => i.id_usuario === idUsuario) : false,
-
-        imagen_url: post.imagen_url,
-        likes: likes.length,
-        dislikes: dislikes.length,
-        liked: likes.some((i) => i.id_usuario === idUsuario),
-        disliked: dislikes.some((i) => i.id_usuario === idUsuario),
-
       };
     });
 
