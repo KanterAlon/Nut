@@ -12,7 +12,7 @@ interface PostRecord {
   contenido_post: string;
   fecha_creacion: string;
   imagen_url: string | null;
-  usuario: { nombre: string | null } | null;
+  usuario: { nombre: string | null }[] | null;
   interacciones: Interaccion[] | null;
 }
 
@@ -39,7 +39,7 @@ export async function GET() {
         id_post: post.id_post,
         contenido_post: post.contenido_post,
         fecha_creacion: post.fecha_creacion,
-        autor: post.usuario?.nombre ?? 'Usuario',
+        autor: post.usuario?.[0]?.nombre ?? 'Usuario',
         imagen_url: post.imagen_url,
         likes: likes.length,
         dislikes: dislikes.length,
