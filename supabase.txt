@@ -1,0 +1,129 @@
+-- WARNING: This schema is for context only and is not meant to be run.
+-- Table order and constraints may not be valid for execution.
+
+CREATE TABLE public.Actividades (
+  id_actividad integer NOT NULL DEFAULT nextval('"Actividades_id_actividad_seq"'::regclass),
+  nombre_actividad text NOT NULL,
+  coef_actividad numeric NOT NULL,
+  CONSTRAINT Actividades_pkey PRIMARY KEY (id_actividad)
+);
+CREATE TABLE public.ActividadesUsuario (
+  id_actividad_usuario integer NOT NULL DEFAULT nextval('"ActividadesUsuario_id_actividad_usuario_seq"'::regclass),
+  id_usuario integer NOT NULL,
+  id_actividad integer,
+  frecuencia_semanal integer NOT NULL,
+  CONSTRAINT ActividadesUsuario_pkey PRIMARY KEY (id_actividad_usuario),
+  CONSTRAINT ActividadesUsuario_id_actividad_fkey FOREIGN KEY (id_actividad) REFERENCES public.Actividades(id_actividad),
+  CONSTRAINT ActividadesUsuario_id_usuario_fkey FOREIGN KEY (id_usuario) REFERENCES public.Usuarios(id_usuario)
+);
+CREATE TABLE public.Articulos (
+  id_articulo integer NOT NULL,
+  nombre_articulo text NOT NULL,
+  img_portada_articulo text NOT NULL,
+  autor text NOT NULL,
+  texto_articulo text NOT NULL,
+  fecha_creacion timestamp without time zone NOT NULL,
+  CONSTRAINT Articulos_pkey PRIMARY KEY (id_articulo)
+);
+CREATE TABLE public.CategoriasArticulosBlog (
+  id_categoria integer NOT NULL,
+  id_articulo integer NOT NULL,
+  CONSTRAINT CategoriasArticulosBlog_pkey PRIMARY KEY (id_categoria, id_articulo),
+  CONSTRAINT CategoriasArticulosBlog_id_articulo_fkey FOREIGN KEY (id_articulo) REFERENCES public.Articulos(id_articulo),
+  CONSTRAINT CategoriasArticulosBlog_id_categoria_fkey FOREIGN KEY (id_categoria) REFERENCES public.CategoriasDeArticulos(id_categoria)
+);
+CREATE TABLE public.CategoriasDeArticulos (
+  id_categoria integer NOT NULL,
+  nombre_categoria text NOT NULL,
+  descripcion_categoria text NOT NULL,
+  CONSTRAINT CategoriasDeArticulos_pkey PRIMARY KEY (id_categoria)
+);
+CREATE TABLE public.Comentarios (
+  id_comentario integer NOT NULL DEFAULT nextval('"Comentarios_id_comentario_seq"'::regclass),
+  id_post integer NOT NULL,
+  id_usuario integer,
+  contenido_comentario text NOT NULL,
+  fecha_comentario timestamp without time zone NOT NULL,
+  CONSTRAINT Comentarios_pkey PRIMARY KEY (id_comentario),
+  CONSTRAINT Comentarios_id_post_fkey FOREIGN KEY (id_post) REFERENCES public.Posts(id_post),
+  CONSTRAINT Comentarios_id_usuario_fkey FOREIGN KEY (id_usuario) REFERENCES public.Usuarios(id_usuario)
+);
+CREATE TABLE public.ImagenesDeArticulos (
+  id_imagen integer NOT NULL,
+  src_imagen text NOT NULL,
+  CONSTRAINT ImagenesDeArticulos_pkey PRIMARY KEY (id_imagen)
+);
+CREATE TABLE public.Interacciones (
+  id_interaccion integer NOT NULL DEFAULT nextval('"Interacciones_id_interaccion_seq"'::regclass),
+  id_usuario integer,
+  id_post integer,
+  id_comentario integer,
+  tipo_interaccion integer,
+  fecha_interaccion timestamp without time zone NOT NULL,
+  CONSTRAINT Interacciones_pkey PRIMARY KEY (id_interaccion),
+  CONSTRAINT Interacciones_id_post_fkey FOREIGN KEY (id_post) REFERENCES public.Posts(id_post),
+  CONSTRAINT Interacciones_id_comentario_fkey FOREIGN KEY (id_comentario) REFERENCES public.Comentarios(id_comentario),
+  CONSTRAINT Interacciones_id_usuario_fkey FOREIGN KEY (id_usuario) REFERENCES public.Usuarios(id_usuario)
+);
+CREATE TABLE public.IntermediaArticulosImagenes (
+  id_articulo integer NOT NULL,
+  id_imagen integer NOT NULL,
+  CONSTRAINT IntermediaArticulosImagenes_pkey PRIMARY KEY (id_articulo, id_imagen),
+  CONSTRAINT IntermediaArticulosImagenes_id_articulo_fkey FOREIGN KEY (id_articulo) REFERENCES public.Articulos(id_articulo),
+  CONSTRAINT IntermediaArticulosImagenes_id_imagen_fkey FOREIGN KEY (id_imagen) REFERENCES public.ImagenesDeArticulos(id_imagen)
+);
+CREATE TABLE public.Logs (
+  id_log integer NOT NULL DEFAULT nextval('"Logs_id_log_seq"'::regclass),
+  id_usuario integer,
+  accion text NOT NULL,
+  fecha_accion timestamp without time zone NOT NULL,
+  descripcion text,
+  CONSTRAINT Logs_pkey PRIMARY KEY (id_log),
+  CONSTRAINT Logs_id_usuario_fkey FOREIGN KEY (id_usuario) REFERENCES public.Usuarios(id_usuario)
+);
+CREATE TABLE public.Notificaciones (
+  id_notificacion integer NOT NULL DEFAULT nextval('"Notificaciones_id_notificacion_seq"'::regclass),
+  id_usuario integer,
+  mensaje text NOT NULL,
+  fecha_notificacion timestamp without time zone NOT NULL,
+  leida boolean NOT NULL DEFAULT false,
+  CONSTRAINT Notificaciones_pkey PRIMARY KEY (id_notificacion),
+  CONSTRAINT Notificaciones_id_usuario_fkey FOREIGN KEY (id_usuario) REFERENCES public.Usuarios(id_usuario)
+);
+CREATE TABLE public.Patologias (
+  id_patologia integer NOT NULL DEFAULT nextval('"Patologias_id_patologia_seq"'::regclass),
+  nombre_patologia text NOT NULL,
+  CONSTRAINT Patologias_pkey PRIMARY KEY (id_patologia)
+);
+CREATE TABLE public.Posts (
+  id_post integer NOT NULL DEFAULT nextval('"Posts_id_post_seq"'::regclass),
+  id_usuario integer,
+  titulo_post text,
+  contenido_post text NOT NULL,
+  fecha_creacion timestamp without time zone NOT NULL,
+  version integer DEFAULT 1,
+  imagen_url text,
+  CONSTRAINT Posts_pkey PRIMARY KEY (id_post),
+  CONSTRAINT Posts_id_usuario_fkey FOREIGN KEY (id_usuario) REFERENCES public.Usuarios(id_usuario)
+);
+CREATE TABLE public.Usuarios (
+  id_usuario integer NOT NULL DEFAULT nextval('"Usuarios_id_usuario_seq"'::regclass),
+  nombre text NOT NULL,
+  email text NOT NULL,
+  fecha_registro timestamp without time zone,
+  ultima_sesion timestamp without time zone,
+  edad integer,
+  sexo boolean,
+  peso double precision,
+  altura double precision,
+  password text,
+  clerkId text,
+  CONSTRAINT Usuarios_pkey PRIMARY KEY (id_usuario)
+);
+CREATE TABLE public.UsuariosPatologias (
+  id_usuario integer NOT NULL,
+  id_patologia integer NOT NULL,
+  CONSTRAINT UsuariosPatologias_pkey PRIMARY KEY (id_usuario, id_patologia),
+  CONSTRAINT UsuariosPatologias_id_usuario_fkey FOREIGN KEY (id_usuario) REFERENCES public.Usuarios(id_usuario),
+  CONSTRAINT UsuariosPatologias_id_patologia_fkey FOREIGN KEY (id_patologia) REFERENCES public.Patologias(id_patologia)
+);
