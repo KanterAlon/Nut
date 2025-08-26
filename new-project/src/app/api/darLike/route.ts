@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabaseClient';
+import { prisma } from '@/lib/prisma';
 
 export async function POST(req: Request) {
   const { idPost } = await req.json();
@@ -8,36 +8,28 @@ export async function POST(req: Request) {
   const idUsuario = 1;
 
   try {
-    const { data: existente, error: existenteError } = await supabase
-      .from('Interacciones')
-      .select('id_interaccion, tipo_interaccion')
-      .eq('id_post', idPost)
-      .eq('id_usuario', idUsuario)
-      .maybeSingle();
+    const existente = await prisma.interacciones.findFirst({
+      where: { id_post: idPost, id_usuario: idUsuario },
+    });
 
-    if (existenteError) throw existenteError;
-
-    if (existente && existente.tipo_interaccion === 1) {
-      const { error: deleteError } = await supabase
-        .from('Interacciones')
-        .delete()
-        .eq('id_interaccion', existente.id_interaccion);
-      if (deleteError) throw deleteError;
+    if (existente?.tipo_interaccion === 1) {
+      await prisma.interacciones.delete({
+        where: { id_interaccion: existente.id_interaccion },
+      });
     } else {
       if (existente) {
-        const { error: delErr } = await supabase
-          .from('Interacciones')
-          .delete()
-          .eq('id_interaccion', existente.id_interaccion);
-        if (delErr) throw delErr;
+        await prisma.interacciones.delete({
+          where: { id_interaccion: existente.id_interaccion },
+        });
       }
-      const { error: insertError } = await supabase.from('Interacciones').insert({
-        id_post: idPost,
-        id_usuario: idUsuario,
-        tipo_interaccion: 1,
-        fecha_interaccion: new Date().toISOString(),
+      await prisma.interacciones.create({
+        data: {
+          id_post: idPost,
+          id_usuario: idUsuario,
+          tipo_interaccion: 1,
+          fecha_interaccion: new Date(),
+        },
       });
-      if (insertError) throw insertError;
     }
 
     return NextResponse.json({ success: true });
