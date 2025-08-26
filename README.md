@@ -34,3 +34,17 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## Contact form configuration
+
+The contact form uses [Nodemailer](https://nodemailer.com/) to send messages. Configure the following environment variables in your `.env` file:
+
+```bash
+MAIL_USER=example@gmail.com
+MAIL_PASS=your_app_password
+# Optional overrides
+MAIL_SERVICE=gmail
+MAIL_TO=wearezeta.contacto@gmail.com
+```
+
+When using Gmail, `MAIL_PASS` must be an [app password](https://support.google.com/mail/?p=InvalidSecondFactor) generated in your Google account. Regular account passwords will be rejected by Gmail and cause an authentication error.
