@@ -4,17 +4,23 @@ import nodemailer from 'nodemailer';
 export async function POST(request: Request) {
   const { name, email, reason, message } = await request.json();
   try {
+    const user = process.env.MAIL_USER;
+    const pass = process.env.MAIL_PASS;
+    if (!user || !pass) {
+      throw new Error('Missing mail credentials');
+    }
+
     const transporter = nodemailer.createTransport({
-      service: 'gmail',
+      service: process.env.MAIL_SERVICE || 'gmail',
       auth: {
-        user: process.env.MAIL_USER,
-        pass: process.env.MAIL_PASS,
+        user,
+        pass,
       },
     });
 
     await transporter.sendMail({
       from: `${name} <${email}>`,
-      to: 'wearezeta.contacto@gmail.com',
+      to: process.env.MAIL_TO || 'wearezeta.contacto@gmail.com',
       subject: `Contacto desde Nut - ${reason}`,
       html: `
         <p><strong>Nombre:</strong> ${name}</p>
