@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/utils/supabase/server';
+import fallbackPosts from '@/data/fallbackPosts';
 import { getAuthedUser } from '@/lib/auth';
+import type { CommunityPost } from '@/types';
+import { isSupabaseConfigured } from '@/utils/supabase/config';
+import { createClient } from '@/utils/supabase/server';
 
 interface Interaccion {
   id_usuario: number;
@@ -16,7 +19,31 @@ interface PostRecord {
   interacciones: Interaccion[] | null;
 }
 
+function respondWithFallback(reason: string) {
+  if (process.env.NODE_ENV !== 'production') {
+    console.warn(
+      'Supabase is unavailable for /api/obtenerPosts. Serving fallback community posts.',
+      reason,
+    );
+  }
+
+  return NextResponse.json({
+    success: true,
+    posts: fallbackPosts,
+    fallback: true,
+    message:
+      'No se pudieron obtener los posts desde la base de datos. Se están mostrando datos de ejemplo.',
+    reason,
+  });
+}
+
 export async function GET() {
+  if (!isSupabaseConfigured()) {
+    return respondWithFallback(
+      'Las variables de entorno de Supabase no están configuradas en este entorno.',
+    );
+  }
+
   try {
     const supabase = await createClient();
     const { data, error } = await supabase
@@ -32,7 +59,7 @@ export async function GET() {
 
     const user = await getAuthedUser();
     const idUsuario = user?.id_usuario ?? null;
-    const posts = ((data as PostRecord[] | null) ?? []).map((post) => {
+    const posts: CommunityPost[] = ((data as PostRecord[] | null) ?? []).map((post) => {
       const likes = (post.interacciones ?? []).filter(i => i.tipo_interaccion === 1);
       const dislikes = (post.interacciones ?? []).filter(i => i.tipo_interaccion === 2);
       return {
@@ -48,13 +75,12 @@ export async function GET() {
       };
     });
 
-    return NextResponse.json({ success: true, posts });
+    return NextResponse.json({ success: true, posts, fallback: false });
   } catch (err) {
-    console.error('Error fetching posts:', err);
-    const message = err instanceof Error ? err.message : 'Error interno del servidor';
-    return NextResponse.json(
-      { success: false, posts: [], message },
-      { status: 500 }
-    );
+    const rawMessage = err instanceof Error ? err.message : 'Error interno del servidor';
+    const reason = /fetch failed/i.test(rawMessage)
+      ? 'No fue posible conectar con Supabase (fetch failed).'
+      : rawMessage;
+    return respondWithFallback(reason);
   }
 }

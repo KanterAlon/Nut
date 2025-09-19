@@ -1,4 +1,5 @@
 import { currentUser } from '@clerk/nextjs/server';
+import { isSupabaseConfigured } from '@/utils/supabase/config';
 import { createClient } from '@/utils/supabase/server';
 
 /**
@@ -30,30 +31,49 @@ export async function getAuthedUser() {
   }
   if (!user) return null;
 
+  if (!isSupabaseConfigured()) {
+    if (process.env.NODE_ENV !== 'production') {
+      console.warn(
+        'Supabase is not configured. Skipping authenticated user synchronization.',
+      );
+    }
+    return null;
+  }
+
   const email = user.emailAddresses[0]?.emailAddress;
   if (!email) return null;
 
-  const supabase = await createClient();
-  const { data: existing, error } = await supabase
-    .from('Usuarios')
-    .select('*')
-    .eq('email', email)
-    .maybeSingle();
-  if (error) throw error;
-
-  if (!existing) {
-    const { data: newUser, error: insertError } = await supabase
+  try {
+    const supabase = await createClient();
+    const { data: existing, error } = await supabase
       .from('Usuarios')
-      .insert({
-        nombre: user.firstName || 'Usuario',
-        email,
-        fecha_registro: new Date().toISOString(),
-      })
-      .select()
-      .single();
-    if (insertError) throw insertError;
-    return newUser;
-  }
+      .select('*')
+      .eq('email', email)
+      .maybeSingle();
+    if (error) throw error;
 
-  return existing;
+    if (!existing) {
+      const { data: newUser, error: insertError } = await supabase
+        .from('Usuarios')
+        .insert({
+          nombre: user.firstName || 'Usuario',
+          email,
+          fecha_registro: new Date().toISOString(),
+        })
+        .select()
+        .single();
+      if (insertError) throw insertError;
+      return newUser;
+    }
+
+    return existing;
+  } catch (error) {
+    if (process.env.NODE_ENV !== 'production') {
+      console.warn(
+        'Supabase is unavailable. Returning unauthenticated session information.',
+        error,
+      );
+    }
+    return null;
+  }
 }
