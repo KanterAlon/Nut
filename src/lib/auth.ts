@@ -7,7 +7,27 @@ import { createClient } from '@/utils/supabase/server';
  * unauthenticated.
  */
 export async function getAuthedUser() {
-  const user = await currentUser();
+  const hasClerkCredentials = Boolean(
+    process.env.CLERK_SECRET_KEY &&
+      process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
+  );
+
+  if (!hasClerkCredentials) {
+    return null;
+  }
+
+  let user: Awaited<ReturnType<typeof currentUser>> | null = null;
+  try {
+    user = await currentUser();
+  } catch (error) {
+    if (process.env.NODE_ENV !== 'production') {
+      console.warn(
+        'Clerk is not available. Skipping authenticated user lookup.',
+        error,
+      );
+    }
+    return null;
+  }
   if (!user) return null;
 
   const email = user.emailAddresses[0]?.emailAddress;
