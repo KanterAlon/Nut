@@ -17,15 +17,26 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const clerkConfigured = Boolean(
+    process.env.CLERK_SECRET_KEY &&
+      process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
+  );
+
+  const markup = (
+    <html lang="en">
+      <body>
+        <Header />
+        <div id="root">{children}</div>
+      </body>
+    </html>
+  );
+
+  if (!clerkConfigured) {
+    return markup;
+  }
+
   return (
-    <ClerkProvider telemetry={false}>
-      <html lang="en">
-        <body>
-          <Header />
-          <div id="root">{children}</div>
-        </body>
-      </html>
-    </ClerkProvider>
+    <ClerkProvider telemetry={false}>{markup}</ClerkProvider>
   );
 }
 
