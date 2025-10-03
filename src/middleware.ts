@@ -1,25 +1,38 @@
 import { clerkMiddleware } from '@clerk/nextjs/server';
-import type { NextMiddleware, NextRequest } from 'next/server';
+import type {
+  NextFetchEvent,
+  NextMiddleware,
+  NextRequest,
+} from 'next/server';
 import { updateSession } from '@/utils/supabase/middleware';
 
-const hasClerkCredentials = Boolean(
-  process.env.CLERK_SECRET_KEY &&
+const missingClerkEnvVars = [
+  ['CLERK_SECRET_KEY', process.env.CLERK_SECRET_KEY],
+  [
+    'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY',
     process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
+  ],
+].filter(([, value]) => !value);
+
+if (missingClerkEnvVars.length > 0) {
+  const missingList = missingClerkEnvVars.map(([name]) => name).join(', ');
+  const message = `Missing Clerk environment variables: ${missingList}. Set the required credentials in your environment to run the app.`;
+  console.error(message);
+  throw new Error(message);
+}
+
+const runClerkMiddleware = clerkMiddleware(async (_auth, req) =>
+  updateSession(req),
 );
 
-let hasLoggedClerkWarning = false;
-
-const middleware: NextMiddleware = hasClerkCredentials
-  ? clerkMiddleware(async (_auth, req) => updateSession(req))
-  : async (req: NextRequest) => {
-      if (!hasLoggedClerkWarning && process.env.NODE_ENV !== 'production') {
-        console.warn(
-          'Clerk credentials are not configured. Skipping Clerk middleware.',
-        );
-        hasLoggedClerkWarning = true;
-      }
-      return updateSession(req);
-    };
+const middleware: NextMiddleware = async (req: NextRequest, event: NextFetchEvent) => {
+  try {
+    return await runClerkMiddleware(req, event);
+  } catch (error) {
+    console.error('Clerk middleware failed to handle the request.', error);
+    throw error;
+  }
+};
 
 export default middleware;
 
