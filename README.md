@@ -48,3 +48,13 @@ MAIL_TO=wearezeta.contacto@gmail.com
 ```
 
 When using Gmail, `MAIL_PASS` must be an [app password](https://support.google.com/mail/?p=InvalidSecondFactor) generated in your Google account. Regular account passwords will be rejected by Gmail and cause an authentication error.
+
+## Camera scanning configuration
+
+The camera workflow relies on Google Cloud Vision. Provide credentials in **one** of the following formats so it works both locally and on Vercel deployments:
+
+1. `GOOGLE_VISION_CREDENTIALS`: JSON credentials or the same string encoded in base64.
+2. `GOOGLE_VISION_CLIENT_EMAIL` and `GOOGLE_VISION_PRIVATE_KEY` (with escaped newlines such as `\n`). Optionally add `GOOGLE_VISION_PROJECT_ID`.
+3. `GOOGLE_APPLICATION_CREDENTIALS`: absolute path to the service account JSON file (suitable for local development).
+
+If none of these variables are defined the camera endpoint will return a friendly error instead of crashing, making configuration issues easier to diagnose.

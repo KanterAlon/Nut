@@ -3,6 +3,7 @@ import { NextRequest } from 'next/server';
 import sharp from 'sharp';
 import { ImageAnnotatorClient } from '@google-cloud/vision';
 import OpenAI from 'openai';
+import fs from 'fs';
 
 export const runtime = 'nodejs';
 
@@ -13,7 +14,71 @@ const OFF_SEARCH_URL =
   process.env.OPENFOODFACTS_SEARCH_URL ||
   'https://world.openfoodfacts.org/cgi/search.pl';
 
-const visionClient = new ImageAnnotatorClient();
+type ServiceAccount = Record<string, unknown> & {
+  client_email?: string;
+  private_key?: string;
+  project_id?: string;
+};
+
+function parseServiceAccount(): ServiceAccount | null {
+  const inlineCredentials = process.env.GOOGLE_VISION_CREDENTIALS;
+  if (inlineCredentials) {
+    try {
+      const json = Buffer.from(inlineCredentials, 'base64').toString('utf-8');
+      return JSON.parse(json);
+    } catch {
+      try {
+        return JSON.parse(inlineCredentials);
+      } catch (err) {
+        console.error('No se pudo parsear GOOGLE_VISION_CREDENTIALS:', err);
+        return null;
+      }
+    }
+  }
+
+  const clientEmail = process.env.GOOGLE_VISION_CLIENT_EMAIL;
+  const privateKey = process.env.GOOGLE_VISION_PRIVATE_KEY;
+  if (clientEmail && privateKey) {
+    return {
+      client_email: clientEmail,
+      private_key: privateKey.replace(/\\n/g, '\n'),
+      project_id: process.env.GOOGLE_VISION_PROJECT_ID,
+    };
+  }
+
+  const credentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+  if (credentialsPath && fs.existsSync(credentialsPath)) {
+    try {
+      const file = fs.readFileSync(credentialsPath, 'utf-8');
+      return JSON.parse(file);
+    } catch (err) {
+      console.error('No se pudo leer GOOGLE_APPLICATION_CREDENTIALS:', err);
+    }
+  }
+
+  return null;
+}
+
+let visionClient: ImageAnnotatorClient | null = null;
+let visionInitError: Error | null = null;
+
+function ensureVisionClient(): ImageAnnotatorClient | null {
+  if (visionClient || visionInitError) return visionClient;
+
+  try {
+    const credentials = parseServiceAccount();
+    visionClient = credentials
+      ? new ImageAnnotatorClient({ credentials })
+      : new ImageAnnotatorClient();
+  } catch (err) {
+    visionInitError = err as Error;
+    console.error('Error al inicializar Google Vision:', visionInitError.message);
+    return null;
+  }
+
+  return visionClient;
+}
+
 const openai = process.env.OPENAI_API_KEY
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
   : null;
@@ -52,21 +117,33 @@ export async function POST(req: NextRequest) {
 
   const encoder = new TextEncoder();
 
+  const client = ensureVisionClient();
+  if (!client) {
+    const message =
+      visionInitError?.message ||
+      'Google Vision no está configurado. Configura las credenciales para usar la cámara.';
+    return new Response(JSON.stringify({ error: message }), { status: 503 });
+  }
+
   const stream = new ReadableStream({
     start: async (controller) => {
       try {
         // 1) Localizar objetos
         let objResp: any;
         try {
-          [objResp] = await visionClient.annotateImage({
+          [objResp] = await client.annotateImage({
             image: { content: buffer },
             features: [{ type: 'OBJECT_LOCALIZATION', maxResults: 100 }],
           });
         } catch (err) {
+          const error = err as Error;
+          visionInitError = error;
+          const message = error.message.includes('Could not load the default credentials')
+            ? 'Google Vision no tiene credenciales configuradas. Revisa las variables de entorno.'
+            : `Google Vision: ${error.message}`;
           controller.enqueue(
             encoder.encode(
-              JSON.stringify({ error: 'Google Vision: ' + (err as Error).message }) +
-                '\n',
+              JSON.stringify({ error: message }) + '\n',
             ),
           );
           controller.close();
@@ -132,7 +209,7 @@ export async function POST(req: NextRequest) {
           // 2) Analizar recorte
           let vResp: any;
           try {
-            [vResp] = await visionClient.annotateImage({
+            [vResp] = await client.annotateImage({
               image: { content: cropBuffer },
               features: [
                 { type: 'BARCODE_DETECTION' },
@@ -144,7 +221,11 @@ export async function POST(req: NextRequest) {
               ],
             });
           } catch (err) {
-            console.error('Error Vision en recorte:', (err as Error).message);
+            const error = err as Error;
+            if (error.message.includes('Could not load the default credentials')) {
+              visionInitError = error;
+            }
+            console.error('Error Vision en recorte:', error.message);
             continue;
           }
 
