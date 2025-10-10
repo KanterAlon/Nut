@@ -7,7 +7,7 @@
   min-width: 398px !important;
   height: 500px !important;
   text-align: justify;
-  align-items: start;
+  align-items: flex-start;
 }
 
 .card-advertisement-blog .arriba-card-blog {

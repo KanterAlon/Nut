@@ -10,6 +10,12 @@ if (process.env.NODE_ENV !== "production" && fs.existsSync(secretsPath)) {
 }
 
 const nextConfig: NextConfig = {
+  webpack: (config, { dev }) => {
+    if (dev) {
+      config.cache = { type: "memory" };
+    }
+    return config;
+  },
   turbopack: {
     // Explicitly define the project root so Next.js doesn't
     // mistakenly treat the repository root as the workspace root

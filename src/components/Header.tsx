@@ -5,10 +5,13 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { FaHome, FaUsers, FaRegNewspaper, FaEnvelopeOpenText } from 'react-icons/fa';
 import { SignedIn, SignedOut, UserButton } from '@clerk/nextjs';
+import { useDevMode } from '@/app/providers/DevModeProvider';
 import '../styles/header.css';
 
 export default function Header() {
   const [menuOpen, setMenuOpen] = useState(false);
+  const { devMode, toggleDevMode } = useDevMode();
+  const isDevRuntime = process.env.NODE_ENV !== 'production';
 
   const toggleMenu = () => setMenuOpen(prev => !prev);
   const closeMenu = () => setMenuOpen(false);
@@ -57,6 +60,18 @@ export default function Header() {
         <SignedIn>
           <UserButton afterSignOutUrl="/" />
         </SignedIn>
+        {isDevRuntime && (
+          <button
+            type="button"
+            className={`dev-toggle ${devMode ? 'active' : ''}`}
+            onClick={() => {
+              toggleDevMode();
+              closeMenu();
+            }}
+          >
+            Dev {devMode ? 'ON' : 'OFF'}
+          </button>
+        )}
       </nav>
 
       <div className={`overlay ${menuOpen ? 'active' : ''}`} onClick={closeMenu}></div>

@@ -67,9 +67,20 @@ function ensureVisionClient(): ImageAnnotatorClient | null {
 
   try {
     const credentials = parseServiceAccount();
-    visionClient = credentials
-      ? new ImageAnnotatorClient({ credentials })
-      : new ImageAnnotatorClient();
+    if (credentials) {
+      visionClient = new ImageAnnotatorClient({ credentials });
+      return visionClient;
+    }
+
+    if (process.env.GOOGLE_APPLICATION_CREDENTIALS || process.env.GOOGLE_CLOUD_PROJECT) {
+      visionClient = new ImageAnnotatorClient();
+      return visionClient;
+    }
+
+    visionInitError = new Error(
+      'Google Vision no esta configurado. Define GOOGLE_VISION_CREDENTIALS o GOOGLE_APPLICATION_CREDENTIALS.',
+    );
+    return null;
   } catch (err) {
     visionInitError = err as Error;
     console.error('Error al inicializar Google Vision:', visionInitError.message);
@@ -77,6 +88,242 @@ function ensureVisionClient(): ImageAnnotatorClient | null {
   }
 
   return visionClient;
+}
+
+type Rect = {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+};
+
+type SharpRegion = {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+};
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function verticesToRect(
+  vertices: Array<{ x?: number; y?: number }> | undefined,
+  normalizedVertices: Array<{ x?: number; y?: number }> | undefined,
+  width: number,
+  height: number,
+): Rect | null {
+  const verts = normalizedVertices && normalizedVertices.length
+    ? normalizedVertices.map((v) => ({
+      x: clamp((v.x ?? 0) * width, 0, width),
+      y: clamp((v.y ?? 0) * height, 0, height),
+    }))
+    : vertices;
+
+  if (!verts || verts.length === 0) return null;
+
+  const xs = verts.map((v) => clamp(v.x ?? 0, 0, width));
+  const ys = verts.map((v) => clamp(v.y ?? 0, 0, height));
+  const left = Math.min(...xs);
+  const right = Math.max(...xs);
+  const top = Math.min(...ys);
+  const bottom = Math.max(...ys);
+
+  if (right - left <= 2 || bottom - top <= 2) return null;
+
+  return { left, top, right, bottom };
+}
+
+function expandRect(rect: Rect, width: number, height: number, factor: number) {
+  const dx = (rect.right - rect.left) * factor;
+  const dy = (rect.bottom - rect.top) * factor;
+  return {
+    left: clamp(rect.left - dx, 0, width),
+    top: clamp(rect.top - dy, 0, height),
+    right: clamp(rect.right + dx, 0, width),
+    bottom: clamp(rect.bottom + dy, 0, height),
+  };
+}
+
+function rectArea(rect: Rect) {
+  return Math.max(0, rect.right - rect.left) * Math.max(0, rect.bottom - rect.top);
+}
+
+function intersectionArea(a: Rect, b: Rect) {
+  const left = Math.max(a.left, b.left);
+  const right = Math.min(a.right, b.right);
+  const top = Math.max(a.top, b.top);
+  const bottom = Math.min(a.bottom, b.bottom);
+  if (right <= left || bottom <= top) return 0;
+  return (right - left) * (bottom - top);
+}
+
+function iou(a: Rect, b: Rect) {
+  const inter = intersectionArea(a, b);
+  if (inter <= 0) return 0;
+  const union = rectArea(a) + rectArea(b) - inter;
+  if (union <= 0) return 0;
+  return inter / union;
+}
+
+function shouldMerge(a: Rect, b: Rect, threshold: number) {
+  return iou(a, b) >= threshold;
+}
+
+function mergeRects(rects: Rect[], threshold: number) {
+  const result: Rect[] = [];
+
+  for (const rect of rects) {
+    let merged = { ...rect };
+
+    for (let i = 0; i < result.length; i += 1) {
+      const candidate = result[i];
+      if (shouldMerge(merged, candidate, threshold)) {
+        merged = {
+          left: Math.min(merged.left, candidate.left),
+          top: Math.min(merged.top, candidate.top),
+          right: Math.max(merged.right, candidate.right),
+          bottom: Math.max(merged.bottom, candidate.bottom),
+        };
+        result.splice(i, 1);
+        i -= 1;
+      }
+    }
+
+    result.push(merged);
+  }
+
+  return result;
+}
+
+function rectToRegion(rect: Rect, width: number, height: number): SharpRegion | null {
+  const left = clamp(Math.floor(rect.left), 0, width);
+  const top = clamp(Math.floor(rect.top), 0, height);
+  const right = clamp(Math.ceil(rect.right), 0, width);
+  const bottom = clamp(Math.ceil(rect.bottom), 0, height);
+  const regionWidth = Math.max(1, right - left);
+  const regionHeight = Math.max(1, bottom - top);
+
+  if (regionWidth <= 4 || regionHeight <= 4) return null;
+
+  return {
+    left,
+    top,
+    width: regionWidth,
+    height: regionHeight,
+  };
+}
+
+function collectCandidateRects(objResp: any, width: number, height: number) {
+  const boxes: Rect[] = [];
+
+  const objects = objResp.localizedObjectAnnotations || [];
+  for (const object of objects) {
+    if (typeof object.score === 'number' && object.score < 0.45) continue;
+    const rect = verticesToRect(
+      object.boundingPoly?.vertices,
+      object.boundingPoly?.normalizedVertices,
+      width,
+      height,
+    );
+    if (rect) boxes.push(expandRect(rect, width, height, 0.08));
+  }
+
+  const logos = objResp.logoAnnotations || [];
+  for (const logo of logos) {
+    if (typeof logo.score === 'number' && logo.score < 0.4) continue;
+    const rect = verticesToRect(
+      logo.boundingPoly?.vertices,
+      logo.boundingPoly?.normalizedVertices,
+      width,
+      height,
+    );
+    if (rect) boxes.push(expandRect(rect, width, height, 0.25));
+  }
+
+  const barcodes = objResp.barcodeAnnotations || [];
+  for (const barcode of barcodes) {
+    const rect = verticesToRect(
+      barcode.boundingBox?.vertices,
+      barcode.boundingBox?.normalizedVertices,
+      width,
+      height,
+    );
+    if (rect) boxes.push(expandRect(rect, width, height, 0.2));
+  }
+
+  const cropHints = objResp.cropHintsAnnotation?.cropHints || [];
+
+  for (const hint of cropHints) {
+    const rect = verticesToRect(
+      hint.boundingPoly?.vertices,
+      hint.boundingPoly?.normalizedVertices,
+      width,
+      height,
+    );
+    if (rect) boxes.push(expandRect(rect, width, height, 0.05));
+  }
+
+  const textBlocks =
+    objResp.fullTextAnnotation?.pages?.flatMap(
+      (page: any) => page.blocks?.map((block: any) => block.boundingBox) || [],
+    ) || [];
+
+  for (const block of textBlocks) {
+    const rect = verticesToRect(block?.vertices, block?.normalizedVertices, width, height);
+    if (rect) boxes.push(expandRect(rect, width, height, 0.15));
+  }
+
+  return boxes;
+}
+
+function buildRegions(objResp: any, width: number, height: number): SharpRegion[] {
+  const minArea = width * height * 0.005;
+  const minDim = Math.min(width, height) * 0.1;
+
+  const rawRects = collectCandidateRects(objResp, width, height);
+  const candidateRects = rawRects.filter((rect, idx, arr) => {
+    const area = rectArea(rect);
+    return !arr.some((other, jdx) => {
+      if (idx === jdx) return false;
+      const overlap = intersectionArea(rect, other);
+      const otherArea = rectArea(other);
+      return overlap > 0 && (overlap / area >= 0.9 || overlap / otherArea >= 0.9);
+    });
+  });
+
+  if (candidateRects.length === 0) {
+    const fallback = rectToRegion({ left: 0, top: 0, right: width, bottom: height }, width, height);
+    return fallback ? [fallback] : [];
+  }
+
+  const merged = mergeRects(candidateRects, 0.5)
+    .map((rect) => ({
+      left: rect.left,
+      top: rect.top,
+      right: rect.right,
+      bottom: rect.bottom,
+    }))
+    .filter((rect) => {
+      const area = rectArea(rect);
+      const w = rect.right - rect.left;
+      const h = rect.bottom - rect.top;
+      return area >= minArea && w >= minDim && h >= minDim;
+    })
+    .sort((a, b) => rectArea(b) - rectArea(a));
+
+  const regions = merged
+    .map((rect) => rectToRegion(rect, width, height))
+    .filter((region): region is SharpRegion => Boolean(region))
+    .slice(0, 8);
+
+  if (regions.length === 0) {
+    const fallback = rectToRegion({ left: 0, top: 0, right: width, bottom: height }, width, height);
+    return fallback ? [fallback] : [];
+  }
+
+  return regions.sort((a, b) => a.left - b.left);
 }
 
 const openai = process.env.OPENAI_API_KEY
@@ -121,7 +368,7 @@ export async function POST(req: NextRequest) {
   if (!client) {
     const message =
       visionInitError?.message ||
-      'Google Vision no está configurado. Configura las credenciales para usar la cámara.';
+      'Google Vision no esta configurado. Configura las credenciales para usar la camara.';
     return new Response(JSON.stringify({ error: message }), { status: 503 });
   }
 
@@ -133,7 +380,13 @@ export async function POST(req: NextRequest) {
         try {
           [objResp] = await client.annotateImage({
             image: { content: buffer },
-            features: [{ type: 'OBJECT_LOCALIZATION', maxResults: 100 }],
+            features: [
+              { type: 'OBJECT_LOCALIZATION', maxResults: 50 },
+              { type: 'LOGO_DETECTION', maxResults: 15 },
+              { type: 'DOCUMENT_TEXT_DETECTION' },
+              { type: 'BARCODE_DETECTION', maxResults: 15 },
+              { type: 'CROP_HINTS', maxResults: 8 },
+            ],
           });
         } catch (err) {
           const error = err as Error;
@@ -151,33 +404,11 @@ export async function POST(req: NextRequest) {
         }
 
         const { width = 0, height = 0 } = await sharp(buffer).metadata();
-        const objects = objResp.localizedObjectAnnotations || [];
-        const regions =
-          objects.length > 0
-            ? objects.map((o: any) => {
-                const verts = o.boundingPoly.normalizedVertices || [];
-                const xs = verts.map((v: any) => (v.x || 0) * width);
-                const ys = verts.map((v: any) => (v.y || 0) * height);
-                let left = Math.max(0, Math.min(...xs));
-                let top = Math.max(0, Math.min(...ys));
-                let right = Math.min(width, Math.max(...xs));
-                let bottom = Math.min(height, Math.max(...ys));
+        const regions = buildRegions(objResp, width, height);
 
-                const padX = Math.floor((right - left) * 0.1);
-                const padY = Math.floor((bottom - top) * 0.1);
-                left = Math.max(0, left - padX);
-                top = Math.max(0, top - padY);
-                right = Math.min(width, right + padX);
-                bottom = Math.min(height, bottom + padY);
-
-                return {
-                  left: Math.floor(left),
-                  top: Math.floor(top),
-                  width: Math.floor(right - left),
-                  height: Math.floor(bottom - top),
-                };
-              })
-            : [{ left: 0, top: 0, width, height }];
+        if (process.env.NODE_ENV !== 'production') {
+          console.log('[camera] regions detected', regions.length);
+        }
 
         controller.enqueue(
           encoder.encode(
@@ -200,6 +431,7 @@ export async function POST(req: NextRequest) {
                   title: 'Error',
                   offImage: null,
                   offLink: null,
+                  code: null,
                 }) + '\n',
               ),
             );
@@ -252,26 +484,26 @@ export async function POST(req: NextRequest) {
           let aiResponse = '';
           if (openai) {
             const prompt = `
-    Eres un asistente en ESPAÑOL experto en productos alimenticios. Recibes un JSON con datos de Google Vision sobre un envase.
-Tu tarea es devolver SOLO el término de búsqueda más corto y útil para buscar ese producto en OpenFoodFacts.
+    Eres un asistente en ESPAÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‹Å“OL experto en productos alimenticios. Recibes un JSON con datos de Google Vision sobre un envase.
+Tu tarea es devolver SOLO el tÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©rmino de bÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Âºsqueda mÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡s corto y ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Âºtil para buscar ese producto en OpenFoodFacts.
 
-    ✅ REGLAS CLARAS:
-    1. Usa el texto OCR (\`text\`) como fuente PRINCIPAL para identificar el nombre genérico.
-       - Si hay varias líneas, elige la más descriptiva en ESPAÑOL que indique qué es el producto.
+    ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ REGLAS CLARAS:
+    1. Usa el texto OCR (\`text\`) como fuente PRINCIPAL para identificar el nombre genÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©rico.
+       - Si hay varias lÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â­neas, elige la mÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡s descriptiva en ESPAÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‹Å“OL que indique quÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â© es el producto.
        - Omite frases de marketing, ingredientes o instrucciones.
     2. Solo incluye la marca si aparece en \`logos\`.
     3. El resultado debe estar en SINGULAR, sin sabores, variantes ni cantidades.
-    4. Si el nombre genérico está en otro idioma, TRADÚCELO al español.
+    4. Si el nombre genÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©rico estÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡ en otro idioma, TRADÃƒÆ’Ã†â€™Ãƒâ€¦Ã‚Â¡CELO al espaÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â±ol.
     5. Usa \`webEnts\` y \`labels\` solo como APOYO para confirmar el OCR, NUNCA como reemplazo.
-    6. No inventes datos. Si no está claro, deja fuera esa parte.
-    7. Devuelve SOLO el término limpio, sin comillas ni explicaciones.
+    6. No inventes datos. Si no estÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡ claro, deja fuera esa parte.
+    7. Devuelve SOLO el tÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©rmino limpio, sin comillas ni explicaciones.
 
-    ✅ EJEMPLOS:
-    - "Barritas Íntegra de Proteína con Arándanos y Semillas" → Barrita Íntegra
-    - "Font Vella Agua Mineral Natural" (con logo Font Vella) → Font Vella Agua Mineral
-    - "Nestlé Chocolate KitKat 4 barras" (con logo KitKat) → KitKat
+    ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ EJEMPLOS:
+    - "Barritas ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Ântegra de ProteÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â­na con ArÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡ndanos y Semillas" ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ Barrita ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Ântegra
+    - "Font Vella Agua Mineral Natural" (con logo Font Vella) ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ Font Vella Agua Mineral
+    - "NestlÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â© Chocolate KitKat 4 barras" (con logo KitKat) ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ KitKat
 
-    Ahora, procesa este JSON y devuelve SOLO la línea con el término final (sin comillas ni nada más):
+    Ahora, procesa este JSON y devuelve SOLO la lÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â­nea con el tÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©rmino final (sin comillas ni nada mÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡s):
 
     \`\`\`json
     ${JSON.stringify(visionData, null, 2)}
@@ -285,7 +517,7 @@ Tu tarea es devolver SOLO el término de búsqueda más corto y útil para busca
                   {
                     role: 'system',
                     content:
-                      'Eres un asistente que genera términos de búsqueda para OpenFoodFacts, en español y con marcas reales.',
+                      'Eres un asistente que genera tÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©rminos de bÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Âºsqueda para OpenFoodFacts, en espaÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â±ol y con marcas reales.',
                   },
                   { role: 'user', content: prompt },
                 ],
@@ -314,7 +546,7 @@ Tu tarea es devolver SOLO el término de búsqueda más corto y útil para busca
               }
             } catch (err) {
               console.error(
-                'Error en OpenFoodFacts por código de barras:',
+                'Error en OpenFoodFacts por cÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â³digo de barras:',
                 (err as Error).message,
               );
             }
@@ -331,6 +563,10 @@ Tu tarea es devolver SOLO el término de búsqueda más corto y útil para busca
             offData?.url || (offData?.code ? `${OFF_PROD_URL}/${offData.code}` : null);
           const offImage = offData?.image_url || offData?.image_front_url || null;
           const title = offData?.product_name || aiResponse;
+          const code =
+            typeof offData?.code === 'string' && offData.code.trim().length > 0
+              ? offData.code
+              : barcodes.find(Boolean) || null;
 
           controller.enqueue(
             encoder.encode(
@@ -341,6 +577,7 @@ Tu tarea es devolver SOLO el término de búsqueda más corto y útil para busca
                 title,
                 offImage,
                 offLink,
+                code,
               }) + '\n',
             ),
           );
@@ -366,4 +603,6 @@ Tu tarea es devolver SOLO el término de búsqueda más corto y útil para busca
     headers: { 'Content-Type': 'application/x-ndjson' },
   });
 }
+
+
 

@@ -3,6 +3,7 @@
 
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { useDevMode } from "@/app/providers/DevModeProvider";
 import Loader from "./Loader";
 import AlertPopup from "./AlertPopup";
 import { FaCheck, FaTimes, FaMinus } from "react-icons/fa";
@@ -70,12 +71,13 @@ export default function ProductPage() {
   const [productName, setProductName] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [alertMessage, setAlertMessage] = useState("");
+  const { devMode } = useDevMode();
 
   useEffect(() => {
     if (!query) return;
     const apiBase = process.env.NEXT_PUBLIC_API_URL || "";
     const start = performance.now();
-    const showAlerts = process.env.NEXT_PUBLIC_TIMING_ALERTS === "true";
+    const showAlerts = devMode;
     fetch(`${apiBase}/api/product?query=${encodeURIComponent(query)}`)
       .then((res) => {
         if (!res.ok) throw new Error(`status ${res.status}`);
@@ -103,7 +105,13 @@ export default function ProductPage() {
         setProductData(null);
         setErrorMessage("Error al cargar el producto");
       });
-  }, [query]);
+  }, [query, devMode]);
+
+  useEffect(() => {
+    if (!devMode) {
+      setAlertMessage("");
+    }
+  }, [devMode]);
 
   const getLevel = (key: string) => productData?.nutrient_levels?.[key];
 

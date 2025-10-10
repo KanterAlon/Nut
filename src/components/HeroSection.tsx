@@ -3,6 +3,7 @@
 import { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { FiSearch, FiCamera } from 'react-icons/fi';
+import { useCameraResults, CameraDetectedProduct } from '@/app/providers/CameraResultsProvider';
 import CameraModal from './CameraModal';
 import Loader from './Loader';
 
@@ -12,6 +13,7 @@ export default function HeroSection() {
   const [loading, setLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
+  const { showResults } = useCameraResults();
   const isMobile = typeof window !== 'undefined' && /Mobi|Android/i.test(navigator.userAgent);
 
   const handleSearch = () => {
@@ -51,8 +53,9 @@ export default function HeroSection() {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let bufferStr = '';
-      let term = '';
-      while (!term) {
+      const products: CameraDetectedProduct[] = [];
+      let shouldStop = false;
+      while (!shouldStop) {
         const { value, done } = await reader.read();
         if (done) break;
         bufferStr += decoder.decode(value, { stream: true });
@@ -60,16 +63,31 @@ export default function HeroSection() {
         bufferStr = lines.pop() || '';
         for (const line of lines) {
           if (!line.trim()) continue;
-          const json = JSON.parse(line);
-          if (json.type === 'product' && !term) {
-            term = json.title || json.aiResponse || '';
+          const payload = JSON.parse(line);
+          if (payload.type === 'product') {
+            products.push({
+              index: typeof payload.index === 'number' ? payload.index : products.length,
+              title: payload.title ?? '',
+              aiResponse: payload.aiResponse ?? '',
+              offImage: payload.offImage ?? null,
+              offLink: payload.offLink ?? null,
+              code: payload.code ?? null,
+            });
+          } else if (payload.type === 'done') {
+            shouldStop = true;
             await reader.cancel();
             break;
+          } else if (payload.error) {
+            console.error('Camera stream error', payload.error);
           }
         }
       }
-      if (term) {
-        router.push(`/search?query=${encodeURIComponent(term)}`);
+      if (products.length > 0) {
+        products.sort((a, b) => a.index - b.index);
+        showResults(products);
+      } else {
+        console.warn('Camara no detecto productos en la imagen.');
+        alert('No se detectaron productos en la imagen. Intenta con otra foto o toma un acercamiento.');
       }
     } catch (err) {
       console.error('Camera search error', err);
@@ -144,4 +162,6 @@ export default function HeroSection() {
     </section>
   );
 }
+
+
 

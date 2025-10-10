@@ -38,3 +38,199 @@
   z-index: 1000;
 }
 
+.camera-results-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.55);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 1.5rem;
+  z-index: 1100;
+}
+
+.camera-results-modal {
+  width: min(980px, 100%);
+  max-height: 90vh;
+  background-color: var(--whiteback-color, #ffffff);
+  border-radius: 18px;
+  box-shadow: 0 20px 30px rgba(0, 0, 0, 0.2);
+  padding: 2rem;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  gap: 1.5rem;
+}
+
+.camera-results-close {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  border: none;
+  background: transparent;
+  color: var(--secondary2-color, #4d4d4d);
+  cursor: pointer;
+  font-size: 1.25rem;
+}
+
+.camera-results-header h2 {
+  margin: 0;
+  font-size: 1.5rem;
+  color: var(--secondary2-color, #4d4d4d);
+}
+
+.camera-results-header p {
+  margin-top: 0.25rem;
+  color: var(--secondary4-color, #a7a297);
+  font-size: 0.95rem;
+}
+
+.camera-results-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
+
+.camera-result-card {
+  border: 1px solid var(--secondary5-color, #e0e0e0);
+  border-radius: 14px;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  background-color: var(--secondary3-color, #f4f1e9);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.camera-result-card.selected {
+  border-color: var(--primary-color, #788a55);
+  box-shadow: 0 0 0 2px rgba(120, 138, 85, 0.15);
+}
+
+.camera-result-image {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 10px;
+  overflow: hidden;
+  background-color: var(--secondary6-color, #e8e8e8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.camera-result-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.camera-result-placeholder {
+  color: var(--secondary4-color, #a7a297);
+  font-size: 0.9rem;
+}
+
+.camera-result-info h3 {
+  margin: 0;
+  font-size: 1.05rem;
+  color: var(--secondary2-color, #4d4d4d);
+}
+
+.camera-result-subtitle {
+  margin-top: 0.25rem;
+  font-size: 0.85rem;
+  color: var(--secondary4-color, #a7a297);
+}
+
+.camera-result-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.camera-result-select,
+.camera-result-details {
+  border: none;
+  border-radius: 999px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.camera-result-select {
+  background-color: var(--primary-color, #788a55);
+  color: var(--secondary3-color, #f4f1e9);
+}
+
+.camera-result-select:disabled {
+  background-color: var(--secondary5-color, #e0e0e0);
+  color: var(--secondary4-color, #a7a297);
+  cursor: not-allowed;
+}
+
+.camera-result-details {
+  background-color: transparent;
+  border: 1px solid var(--primary-color, #788a55);
+  color: var(--primary-color, #788a55);
+}
+
+.camera-result-details:disabled {
+  border-color: var(--secondary5-color, #e0e0e0);
+  color: var(--secondary4-color, #a7a297);
+  cursor: not-allowed;
+}
+
+.camera-results-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-top: auto;
+}
+
+.camera-results-compare,
+.camera-results-dismiss {
+  padding: 0.65rem 1.5rem;
+  border-radius: 999px;
+  border: none;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.camera-results-compare {
+  background-color: var(--primary-color, #788a55);
+  color: var(--secondary3-color, #f4f1e9);
+}
+
+.camera-results-compare:disabled {
+  background-color: var(--secondary5-color, #e0e0e0);
+  color: var(--secondary4-color, #a7a297);
+  cursor: not-allowed;
+}
+
+.camera-results-dismiss {
+  background-color: transparent;
+  border: 1px solid var(--secondary2-color, #4d4d4d);
+  color: var(--secondary2-color, #4d4d4d);
+}
+
+@media (max-width: 720px) {
+  .camera-results-modal {
+    padding: 1.5rem;
+  }
+
+  .camera-results-footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .camera-results-compare,
+  .camera-results-dismiss {
+    width: 100%;
+  }
+}
+

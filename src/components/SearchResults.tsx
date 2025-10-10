@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { useDevMode } from '@/app/providers/DevModeProvider';
 import LazyImage from './LazyImage';
 import AlertPopup from './AlertPopup';
 
@@ -21,13 +22,14 @@ export default function SearchResults() {
   const [warning, setWarning] = useState('');
   const [alertMessage, setAlertMessage] = useState('');
   const router = useRouter();
+  const { devMode } = useDevMode();
 
   useEffect(() => {
     if (!query) return;
     setLoading(true);
     const apiBase = process.env.NEXT_PUBLIC_API_URL || '';
     const start = performance.now();
-    const showAlerts = process.env.NEXT_PUBLIC_TIMING_ALERTS === 'true';
+    const showAlerts = devMode;
     fetch(`${apiBase}/api/SearchProducts?query=${encodeURIComponent(query)}`)
       .then((res) => {
         if (!res.ok) throw new Error(`status ${res.status}`);
@@ -47,7 +49,13 @@ export default function SearchResults() {
       })
       .catch(() => setProducts([]))
       .finally(() => setLoading(false));
-  }, [query]);
+  }, [query, devMode]);
+
+  useEffect(() => {
+    if (!devMode) {
+      setAlertMessage('');
+    }
+  }, [devMode]);
 
   const handleClick = (product: Product) => {
     if (selectionMode) {

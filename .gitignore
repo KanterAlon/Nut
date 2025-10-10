@@ -34,6 +34,7 @@ yarn-error.log*
 # env files
 
 .env.local.secrets
+config/google-vision-credentials.json
 
 # vercel
 .vercel

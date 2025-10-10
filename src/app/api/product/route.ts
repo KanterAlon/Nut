@@ -27,8 +27,10 @@ export async function GET(req: NextRequest) {
   const isEAN = /^\d{8,13}$/.test(query);
   const normalized = isEAN ? query : normalize(query);
   const cacheKey = `product:${normalized}`;
+  const devCookie = req.cookies.get('dev')?.value;
+  const bypassCache = devCookie === 'true' || process.env.DEV_DISABLE_CACHE === 'true';
 
-  const { data: cachedProduct, source, freq } = await readCache(cacheKey);
+  const { data: cachedProduct, source, freq } = await readCache(cacheKey, { bypass: bypassCache });
   let product: OffProduct | null = (cachedProduct as OffProduct) ?? null;
 
   if (!product) {
@@ -61,7 +63,7 @@ export async function GET(req: NextRequest) {
         product = productos[0];
       }
 
-      await writeCache(cacheKey, product, freq);
+      await writeCache(cacheKey, product, freq, { bypass: bypassCache });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error('Error en API product:', message);

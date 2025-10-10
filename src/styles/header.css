@@ -44,6 +44,32 @@ header {
   height: 30px;
 }
 
+.dev-toggle {
+  display: inline-flex;
+  align-items: center;
+  border: 1px dashed var(--secondary2-color);
+  background: transparent;
+  color: var(--secondary2-color);
+  border-radius: 999px;
+  padding: 0.35rem 0.75rem;
+  font-family: var(--font-family-button);
+  font-size: 0.75rem;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
+.dev-toggle.active {
+  background-color: var(--primary-color);
+  border-color: var(--primary-color);
+  color: var(--secondary3-color);
+}
+
+.dev-toggle:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
+}
+
 
 .login-button, .icon-group {
   display: flex;
@@ -223,7 +249,8 @@ span.button-text{
 
   .login-button,
   .icon-group,
-  .user-button {
+  .user-button,
+  .dev-toggle {
     width: 100%;
     justify-content: flex-start;
   }
