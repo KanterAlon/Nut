@@ -153,8 +153,6 @@ function CameraResultsOverlay() {
   const [selectedCodes, setSelectedCodes] = useState<string[]>([]);
   const [selectedBoxIds, setSelectedBoxIds] = useState<string[]>([]);
   const [hoveredBoxId, setHoveredBoxId] = useState<string | null>(null);
-  const [hideLowConfidence, setHideLowConfidence] = useState(false);
-  const [confidenceThreshold, setConfidenceThreshold] = useState(0.45);
 
   const imageContainerRef = useRef<HTMLDivElement>(null);
 
@@ -174,28 +172,23 @@ function CameraResultsOverlay() {
     if (open) {
       setSelectedCodes([]);
       setSelectedBoxIds([]);
-      setHoveredBoxId(null);
-      setHideLowConfidence(false);
+      setHoveredBoxId(null);
     }
   }, [open]);
 
-  useEffect(() => {
-    if (open && typeof meta?.minScore === 'number') {
-      const next = Math.min(Math.max(meta.minScore, 0.2), 0.9);
-      setConfidenceThreshold(next);
-    }
-  }, [open, meta?.minScore]);
 
   if (!open) return null;
 
   const toggleSelection = (product: CameraDetectedProduct) => {
     if (!product.code || product.status !== 'ready') return;
+    const code = product.code;
     setSelectedCodes((prev) =>
-      prev.includes(product.code) ? prev.filter((value) => value !== product.code) : [...prev, product.code],
+      prev.includes(code) ? prev.filter((value) => value !== code) : [...prev, code],
     );
     if (product.boxId) {
+      const boxId = product.boxId;
       setSelectedBoxIds((prev) =>
-        prev.includes(product.boxId) ? prev.filter((value) => value !== product.boxId) : [...prev, product.boxId],
+        prev.includes(boxId) ? prev.filter((value) => value !== boxId) : [...prev, boxId],
       );
     }
   };
@@ -227,19 +220,12 @@ function CameraResultsOverlay() {
   selectedBoxIds.forEach((id) => activeBoxIds.add(id));
   if (hoveredBoxId) activeBoxIds.add(hoveredBoxId);
 
-  const filteredResults = hideLowConfidence
-    ? results.filter((product) => {
-        const confidence = product.offConfidence ?? product.score ?? 0;
-        return confidence >= confidenceThreshold;
-      })
-    : results;
-  const hiddenCount = hideLowConfidence ? results.length - filteredResults.length : 0;
   const summaryParts: string[] = [];
-  if (typeof meta?.minScore === 'number') {
-    summaryParts.push(`Umbral ${(meta.minScore * 100).toFixed(0)}%`);
-  }
   if (typeof meta?.detectionCount === 'number') {
-    summaryParts.push(`Detecciones ${meta.detectionCount}`);
+    summaryParts.push(`Detecciones: ${meta.detectionCount}`);
+  }
+  if (meta?.status === 'processing') {
+    summaryParts.push('Analizando...');
   }
 
   return (
@@ -255,40 +241,13 @@ function CameraResultsOverlay() {
         </button>
         <header className="camera-results-header">
           <h2>Productos detectados</h2>
-          <p>
-            Selecciona los productos que deseas comparar o amplia los detalles de cada uno.
+          <p className="camera-results-subtitle">
+            Revisa los hallazgos, elige los que quieras comparar y toca la imagen para afinar la detección si algo falta.
           </p>
           {!!summaryParts.length && (
-            <p className="camera-results-summary">{summaryParts.join(' • ')}</p>
+            <p className="camera-results-summary">{summaryParts.join(' | ')}</p>
           )}
         </header>
-
-        <div className="camera-results-toolbar">
-          <label className="camera-results-filter">
-            <input
-              type="checkbox"
-              checked={hideLowConfidence}
-              onChange={(e) => setHideLowConfidence(e.target.checked)}
-              disabled={!results.length}
-            />
-            Ocultar detecciones &lt; {(confidenceThreshold * 100).toFixed(0)}%
-          </label>
-          <input
-            type="range"
-            className="camera-results-filter-range"
-            min={0.2}
-            max={0.9}
-            step={0.05}
-            value={confidenceThreshold}
-            onChange={(e) => setConfidenceThreshold(Math.min(Math.max(Number(e.target.value), 0.2), 0.9))}
-            disabled={!hideLowConfidence || !results.length}
-          />
-          {hideLowConfidence && hiddenCount > 0 && (
-            <span className="camera-results-filter-info">
-              Ocultando {hiddenCount} deteccion{hiddenCount === 1 ? '' : 'es'}
-            </span>
-          )}
-        </div>
 
         {meta?.status === 'processing' && (
           <div className="camera-results-processing">Analizando detecciones...</div>
@@ -326,21 +285,12 @@ function CameraResultsOverlay() {
 
         {meta?.status === 'no-products' && (
           <div className="camera-results-empty">
-            <p>{meta?.statusMessage || 'No se detectaron productos en la imagen.'}</p>
-          </div>
-        )}
-
-        {hideLowConfidence && filteredResults.length === 0 && results.length > 0 && (
-          <div className="camera-results-empty">
-            <p>
-              No hay detecciones con confianza superior a {(confidenceThreshold * 100).toFixed(0)}%. Ajusta el filtro
-              para ver todos los resultados.
-            </p>
+            <p>{meta.statusMessage || 'No se detectaron productos en la imagen.'}</p>
           </div>
         )}
 
         <div className="camera-results-grid">
-          {filteredResults.map((product) => {
+          {results.map((product) => {
             const displayTitle = product.title || product.aiResponse || `Producto ${product.index + 1}`;
             const summary = product.aiResponse && product.aiResponse !== displayTitle ? product.aiResponse : null;
             const status = product.status ?? 'ready';
@@ -362,15 +312,27 @@ function CameraResultsOverlay() {
                   return null;
               }
             })();
-              const selected = product.code ? selectedCodes.includes(product.code) : false;
-              const confidence = product.offConfidence ?? product.score ?? null;
-              const confidenceLabel = confidence != null ? `${Math.round(confidence * 100)}%` : null;
-              const searchHint = product.searchQuery || product.searchCandidates?.[0] || null;
-              const canCompare = Boolean(product.code) && status === 'ready';
-              const detailsDisabled =
-                (!product.code && !searchHint) || status === 'processing' || status === 'pending';
-              const detailsLabel = 'Ampliar detalles';
+            const selected = product.code ? selectedCodes.includes(product.code) : false;
+            const confidence = product.offConfidence ?? product.score ?? null;
+            const confidenceLabel = confidence != null ? `${Math.round(confidence * 100)}%` : null;
+            const searchHint = product.searchQuery || product.searchCandidates?.[0] || null;
+            const canCompare = Boolean(product.code) && status === 'ready';
+            const detailsDisabled =
+              (!product.code && !searchHint) || status === 'processing' || status === 'pending';
+            const detailsLabel = 'Ver detalle';
             const cardClass = `camera-result-card${selected ? ' selected' : ''} status-${status}`;
+            const offSearchUrl = (() => {
+              const query = searchHint || product.title || product.prompt || '';
+              if (!query) return null;
+              const params = new URLSearchParams({
+                search_terms: query,
+                search_simple: '1',
+                action: 'process',
+                json: '1',
+              });
+              return `https://world.openfoodfacts.org/cgi/search.pl?${params.toString()}`;
+            })();
+
             return (
               <div
                 key={`${product.index}-${product.boxId ?? product.code ?? 'no-code'}`}
@@ -463,6 +425,16 @@ function CameraResultsOverlay() {
                   >
                     {detailsLabel}
                   </button>
+                  {offSearchUrl && (
+                    <a
+                      className="camera-result-offlink"
+                      href={offSearchUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      Elegir otro en OpenFoodFacts
+                    </a>
+                  )}
                 </div>
               </div>
             );
@@ -489,3 +461,5 @@ function CameraResultsOverlay() {
     </div>
   );
 }
+
+

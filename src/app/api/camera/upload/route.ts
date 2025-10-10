@@ -686,7 +686,7 @@ async function lookupByBarcode(barcode: string) {
   return null;
 }
 
-async function searchOpenFoodFacts(query: string) {
+async function searchOpenFoodFacts(query: string): Promise<OffProduct[]> {
   const trimmed = query.trim();
   if (!trimmed) return [];
   const cacheKey = trimmed.toLowerCase();
@@ -703,7 +703,7 @@ async function searchOpenFoodFacts(query: string) {
       fields: 'code,product_name,brands,image_url,image_front_url,url,categories_tags,generic_name',
     });
     const res = await fetch(`${base}?${params}`, { cache: 'no-store' });
-    if (!res.ok) return null;
+    if (!res.ok) return [];
     const data = await res.json();
     const products = Array.isArray(data.products) ? (data.products as OffProduct[]) : [];
     offSearchCache.set(cacheKey, products);

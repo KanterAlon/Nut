@@ -176,21 +176,25 @@ export default function HeroSection() {
           case 'boxes': {
             const parsed = parseBoxes(payload.boxes, boxes);
             boxes.push(...parsed);
-            meta = {
-              ...(meta ?? {
+            const previousMeta: CameraResultsMeta =
+              meta ?? {
                 imageDataUrl: null,
                 width: 0,
                 height: 0,
                 boxes: [],
                 startedAt: Date.now(),
-              }),
+              };
+            meta = {
+              ...previousMeta,
               boxes: parsed,
               minScore:
-                typeof payload.minScore === 'number' ? clamp01(payload.minScore) : meta?.minScore,
+                typeof payload.minScore === 'number'
+                  ? clamp01(payload.minScore)
+                  : previousMeta.minScore,
               detectionCount:
                 typeof payload.detectionCount === 'number'
                   ? payload.detectionCount
-                  : parsed.length,
+                  : previousMeta.detectionCount ?? parsed.length,
               onRefine: refineAt,
             };
             syncResults();
