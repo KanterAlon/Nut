@@ -21,7 +21,9 @@ export async function GET(req: NextRequest) {
   const cacheKey = `search:${normalizedQuery}`;
   const startTime = Date.now();
   const devCookie = req.cookies.get('dev')?.value;
-  const bypassCache = devCookie === 'true' || process.env.DEV_DISABLE_CACHE === 'true';
+  const forceCache = process.env.FORCE_REDIS_CACHE === 'true';
+  const bypassCache =
+    !forceCache && (devCookie === 'true' || process.env.DEV_DISABLE_CACHE === 'true');
 
   if (process.env.NODE_ENV !== 'production') {
     console.log('[SearchProducts] cache lookup', {

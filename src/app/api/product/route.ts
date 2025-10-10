@@ -28,7 +28,9 @@ export async function GET(req: NextRequest) {
   const normalized = isEAN ? query : normalize(query);
   const cacheKey = `product:${normalized}`;
   const devCookie = req.cookies.get('dev')?.value;
-  const bypassCache = devCookie === 'true' || process.env.DEV_DISABLE_CACHE === 'true';
+  const forceCache = process.env.FORCE_REDIS_CACHE === 'true';
+  const bypassCache =
+    !forceCache && (devCookie === 'true' || process.env.DEV_DISABLE_CACHE === 'true');
 
   const { data: cachedProduct, source, freq } = await readCache(cacheKey, { bypass: bypassCache });
   let product: OffProduct | null = (cachedProduct as OffProduct) ?? null;
