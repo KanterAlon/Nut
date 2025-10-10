@@ -10,9 +10,16 @@ if (process.env.NODE_ENV !== "production" && fs.existsSync(secretsPath)) {
 }
 
 const nextConfig: NextConfig = {
-  webpack: (config, { dev }) => {
+  serverExternalPackages: ["onnxruntime-node", "sharp", "@huggingface/transformers", "tesseract.js"],
+  webpack: (config, { dev, isServer }) => {
     if (dev) {
       config.cache = { type: "memory" };
+    }
+    if (!isServer) {
+      config.resolve = config.resolve ?? {};
+      config.resolve.alias = config.resolve.alias ?? {};
+      config.resolve.alias["onnxruntime-node"] = false;
+      config.resolve.alias["sharp"] = false;
     }
     return config;
   },

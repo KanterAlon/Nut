@@ -1,94 +1,44 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest } from 'next/server';
-import sharp from 'sharp';
-import { ImageAnnotatorClient } from '@google-cloud/vision';
-import OpenAI from 'openai';
-import fs from 'fs';
+import sharp, { type Sharp } from 'sharp';
+import { pipeline, RawImage } from '@huggingface/transformers';
+import vision from '@google-cloud/vision';
 
 export const runtime = 'nodejs';
 
-const OFF_PROD_URL =
-  process.env.OPENFOODFACTS_PRODUCT_URL ||
-  'https://world.openfoodfacts.org/api/v2/product';
-const OFF_SEARCH_URL =
-  process.env.OPENFOODFACTS_SEARCH_URL ||
-  'https://world.openfoodfacts.org/cgi/search.pl';
+const DETECTION_PROMPTS = [
+  'food product',
+  'food package',
+  'packaged food',
+  'snack',
+  'drink',
+  'bottle',
+  'can',
+  'box',
+  'bag of chips',
+  'cookies',
+  'cereal',
+  'yogurt',
+  'milk carton',
+  'juice',
+  'soda',
+  'producto',
+  'bebida',
+] as const;
 
-type ServiceAccount = Record<string, unknown> & {
-  client_email?: string;
-  private_key?: string;
-  project_id?: string;
-};
+const MAX_DETECTIONS = 10;
+const MERGE_IOU_THRESHOLD = 0.45;
+const MAX_DETECTION_SIDE = 1280;
+const DETECTION_CONFIG = { minScore: 0.3, topK: 60 };
+const FALLBACK_LABEL = 'food product';
+const FOCUS_DETECTION_MIN_SCORE = 0.22;
+const FOCUS_REGION_SCALE = 0.55;
 
-function parseServiceAccount(): ServiceAccount | null {
-  const inlineCredentials = process.env.GOOGLE_VISION_CREDENTIALS;
-  if (inlineCredentials) {
-    try {
-      const json = Buffer.from(inlineCredentials, 'base64').toString('utf-8');
-      return JSON.parse(json);
-    } catch {
-      try {
-        return JSON.parse(inlineCredentials);
-      } catch (err) {
-        console.error('No se pudo parsear GOOGLE_VISION_CREDENTIALS:', err);
-        return null;
-      }
-    }
-  }
-
-  const clientEmail = process.env.GOOGLE_VISION_CLIENT_EMAIL;
-  const privateKey = process.env.GOOGLE_VISION_PRIVATE_KEY;
-  if (clientEmail && privateKey) {
-    return {
-      client_email: clientEmail,
-      private_key: privateKey.replace(/\\n/g, '\n'),
-      project_id: process.env.GOOGLE_VISION_PROJECT_ID,
-    };
-  }
-
-  const credentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
-  if (credentialsPath && fs.existsSync(credentialsPath)) {
-    try {
-      const file = fs.readFileSync(credentialsPath, 'utf-8');
-      return JSON.parse(file);
-    } catch (err) {
-      console.error('No se pudo leer GOOGLE_APPLICATION_CREDENTIALS:', err);
-    }
-  }
-
-  return null;
-}
-
-let visionClient: ImageAnnotatorClient | null = null;
-let visionInitError: Error | null = null;
-
-function ensureVisionClient(): ImageAnnotatorClient | null {
-  if (visionClient || visionInitError) return visionClient;
-
-  try {
-    const credentials = parseServiceAccount();
-    if (credentials) {
-      visionClient = new ImageAnnotatorClient({ credentials });
-      return visionClient;
-    }
-
-    if (process.env.GOOGLE_APPLICATION_CREDENTIALS || process.env.GOOGLE_CLOUD_PROJECT) {
-      visionClient = new ImageAnnotatorClient();
-      return visionClient;
-    }
-
-    visionInitError = new Error(
-      'Google Vision no esta configurado. Define GOOGLE_VISION_CREDENTIALS o GOOGLE_APPLICATION_CREDENTIALS.',
-    );
-    return null;
-  } catch (err) {
-    visionInitError = err as Error;
-    console.error('Error al inicializar Google Vision:', visionInitError.message);
-    return null;
-  }
-
-  return visionClient;
-}
+const MAX_OCR_CONCURRENCY = 3;
+const OCR_MIN_TOTAL_CHARS = 8;
+const OCR_MIN_LINE_LENGTH = 3;
+const OFF_CONFIDENCE_THRESHOLD = 0.35;
+const OFF_MAX_CANDIDATES = 3;
 
 type Rect = {
   left: number;
@@ -97,53 +47,182 @@ type Rect = {
   bottom: number;
 };
 
-type SharpRegion = {
-  left: number;
-  top: number;
+type NormalizedBox = {
+  x: number;
+  y: number;
   width: number;
   height: number;
 };
+
+type DetectionRegion = {
+  id: string;
+  label: string;
+  score: number;
+  rect: Rect;
+  normalized: NormalizedBox;
+};
+
+type OffProduct = {
+  code?: string;
+  product_name?: string;
+  brands?: string;
+  image_url?: string;
+  image_front_url?: string;
+  url?: string;
+};
+
+type FocusPoint = {
+  x: number;
+  y: number;
+};
+
+const offBarcodeCache = new Map<string, OffProduct | null>();
+const offSearchCache = new Map<string, OffProduct[]>();
+
+let detectorPromise: Promise<any> | null = null;
+const visionClient = new vision.ImageAnnotatorClient();
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
 
-function verticesToRect(
-  vertices: Array<{ x?: number; y?: number }> | undefined,
-  normalizedVertices: Array<{ x?: number; y?: number }> | undefined,
-  width: number,
-  height: number,
-): Rect | null {
-  const verts = normalizedVertices && normalizedVertices.length
-    ? normalizedVertices.map((v) => ({
-      x: clamp((v.x ?? 0) * width, 0, width),
-      y: clamp((v.y ?? 0) * height, 0, height),
-    }))
-    : vertices;
+function normalizeLangs(input: unknown, fallback = 'eng') {
+  const langs: string[] = [];
 
-  if (!verts || verts.length === 0) return null;
+  const collect = (value: unknown) => {
+    if (!value) return;
+    if (Array.isArray(value)) {
+      value.forEach(collect);
+      return;
+    }
+    if (value instanceof File) return;
+    const text = String(value).trim();
+    if (!text) return;
+    text
+      .split(/[+,\s]+/)
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .forEach((part) => langs.push(part));
+  };
 
-  const xs = verts.map((v) => clamp(v.x ?? 0, 0, width));
-  const ys = verts.map((v) => clamp(v.y ?? 0, 0, height));
-  const left = Math.min(...xs);
-  const right = Math.max(...xs);
-  const top = Math.min(...ys);
-  const bottom = Math.max(...ys);
+  collect(input);
 
-  if (right - left <= 2 || bottom - top <= 2) return null;
+  if (!langs.length) {
+    langs.push(fallback);
+  }
 
-  return { left, top, right, bottom };
+  return langs;
 }
 
-function expandRect(rect: Rect, width: number, height: number, factor: number) {
-  const dx = (rect.right - rect.left) * factor;
-  const dy = (rect.bottom - rect.top) * factor;
-  return {
-    left: clamp(rect.left - dx, 0, width),
-    top: clamp(rect.top - dy, 0, height),
-    right: clamp(rect.right + dx, 0, width),
-    bottom: clamp(rect.bottom + dy, 0, height),
+function toLanguageHints(langs: string[]) {
+  const mapping: Record<string, string> = {
+    eng: 'en',
+    en: 'en',
+    spa: 'es',
+    es: 'es',
+    esp: 'es',
+    fra: 'fr',
+    fr: 'fr',
+    deu: 'de',
+    ger: 'de',
+    ita: 'it',
   };
+  const hints: string[] = [];
+  for (const lang of langs) {
+    const lower = lang.toLowerCase();
+    const mapped = mapping[lower] ?? lower.slice(0, 2);
+    if (!hints.includes(mapped)) {
+      hints.push(mapped);
+    }
+  }
+  return hints.slice(0, 4);
+}
+
+function parseFocusPoints(value: unknown): FocusPoint[] {
+  if (!value) return [];
+  const raw = Array.isArray(value)
+    ? value
+    : typeof value === 'string'
+    ? (() => {
+        try {
+          return JSON.parse(value) as unknown;
+        } catch {
+          return [];
+        }
+      })()
+    : [];
+  if (!Array.isArray(raw)) return [];
+  const points: FocusPoint[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue;
+    const record = entry as Record<string, unknown>;
+    const x = Number(record.x);
+    const y = Number(record.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    points.push({
+      x: clamp(x, 0, 1),
+      y: clamp(y, 0, 1),
+    });
+  }
+  return points.slice(0, 6);
+}
+
+async function prepareDetectionInput(image: Sharp, originalBuffer: Buffer, width: number, height: number) {
+  const maxSide = Math.max(width, height);
+  if (maxSide <= 0) {
+    return {
+      buffer: originalBuffer,
+      width,
+      height,
+      scaleX: 1,
+      scaleY: 1,
+    };
+  }
+  if (maxSide <= MAX_DETECTION_SIDE) {
+    return {
+      buffer: originalBuffer,
+      width,
+      height,
+      scaleX: 1,
+      scaleY: 1,
+    };
+  }
+
+  const scale = MAX_DETECTION_SIDE / maxSide;
+  const targetWidth = Math.max(1, Math.round(width * scale));
+  const targetHeight = Math.max(1, Math.round(height * scale));
+  const resized = await image
+    .clone()
+    .resize({
+      width: targetWidth,
+      height: targetHeight,
+      fit: 'inside',
+      withoutEnlargement: true,
+    })
+    .toBuffer();
+
+  return {
+    buffer: resized,
+    width: targetWidth,
+    height: targetHeight,
+    scaleX: width / targetWidth,
+    scaleY: height / targetHeight,
+  };
+}
+
+async function preprocessForOcr(buffer: Buffer) {
+  try {
+    return await sharp(buffer)
+      .removeAlpha()
+      .trim()
+      .greyscale()
+      .normalise()
+      .sharpen({ sigma: 1 })
+      .toBuffer();
+  } catch (err) {
+    console.error('OCR preprocess error', (err as Error).message);
+    return buffer;
+  }
 }
 
 function rectArea(rect: Rect) {
@@ -167,430 +246,882 @@ function iou(a: Rect, b: Rect) {
   return inter / union;
 }
 
-function shouldMerge(a: Rect, b: Rect, threshold: number) {
-  return iou(a, b) >= threshold;
-}
-
-function mergeRects(rects: Rect[], threshold: number) {
-  const result: Rect[] = [];
-
-  for (const rect of rects) {
-    let merged = { ...rect };
-
-    for (let i = 0; i < result.length; i += 1) {
-      const candidate = result[i];
-      if (shouldMerge(merged, candidate, threshold)) {
-        merged = {
-          left: Math.min(merged.left, candidate.left),
-          top: Math.min(merged.top, candidate.top),
-          right: Math.max(merged.right, candidate.right),
-          bottom: Math.max(merged.bottom, candidate.bottom),
-        };
-        result.splice(i, 1);
-        i -= 1;
-      }
-    }
-
-    result.push(merged);
+function toRect(
+  box: { xmin: number; ymin: number; xmax: number; ymax: number },
+  width: number,
+  height: number,
+): Rect {
+  let { xmin, ymin, xmax, ymax } = box;
+  if (xmin <= 1 && xmax <= 1 && ymin <= 1 && ymax <= 1) {
+    xmin *= width;
+    xmax *= width;
+    ymin *= height;
+    ymax *= height;
   }
-
-  return result;
-}
-
-function rectToRegion(rect: Rect, width: number, height: number): SharpRegion | null {
-  const left = clamp(Math.floor(rect.left), 0, width);
-  const top = clamp(Math.floor(rect.top), 0, height);
-  const right = clamp(Math.ceil(rect.right), 0, width);
-  const bottom = clamp(Math.ceil(rect.bottom), 0, height);
-  const regionWidth = Math.max(1, right - left);
-  const regionHeight = Math.max(1, bottom - top);
-
-  if (regionWidth <= 4 || regionHeight <= 4) return null;
-
+  const left = clamp(xmin, 0, width);
+  const right = clamp(xmax, 0, width);
+  const top = clamp(ymin, 0, height);
+  const bottom = clamp(ymax, 0, height);
   return {
-    left,
-    top,
-    width: regionWidth,
-    height: regionHeight,
+    left: Math.min(left, right - 1),
+    right: Math.max(right, left + 1),
+    top: Math.min(top, bottom - 1),
+    bottom: Math.max(bottom, top + 1),
   };
 }
 
-function collectCandidateRects(objResp: any, width: number, height: number) {
-  const boxes: Rect[] = [];
-
-  const objects = objResp.localizedObjectAnnotations || [];
-  for (const object of objects) {
-    if (typeof object.score === 'number' && object.score < 0.45) continue;
-    const rect = verticesToRect(
-      object.boundingPoly?.vertices,
-      object.boundingPoly?.normalizedVertices,
-      width,
-      height,
-    );
-    if (rect) boxes.push(expandRect(rect, width, height, 0.08));
-  }
-
-  const logos = objResp.logoAnnotations || [];
-  for (const logo of logos) {
-    if (typeof logo.score === 'number' && logo.score < 0.4) continue;
-    const rect = verticesToRect(
-      logo.boundingPoly?.vertices,
-      logo.boundingPoly?.normalizedVertices,
-      width,
-      height,
-    );
-    if (rect) boxes.push(expandRect(rect, width, height, 0.25));
-  }
-
-  const barcodes = objResp.barcodeAnnotations || [];
-  for (const barcode of barcodes) {
-    const rect = verticesToRect(
-      barcode.boundingBox?.vertices,
-      barcode.boundingBox?.normalizedVertices,
-      width,
-      height,
-    );
-    if (rect) boxes.push(expandRect(rect, width, height, 0.2));
-  }
-
-  const cropHints = objResp.cropHintsAnnotation?.cropHints || [];
-
-  for (const hint of cropHints) {
-    const rect = verticesToRect(
-      hint.boundingPoly?.vertices,
-      hint.boundingPoly?.normalizedVertices,
-      width,
-      height,
-    );
-    if (rect) boxes.push(expandRect(rect, width, height, 0.05));
-  }
-
-  const textBlocks =
-    objResp.fullTextAnnotation?.pages?.flatMap(
-      (page: any) => page.blocks?.map((block: any) => block.boundingBox) || [],
-    ) || [];
-
-  for (const block of textBlocks) {
-    const rect = verticesToRect(block?.vertices, block?.normalizedVertices, width, height);
-    if (rect) boxes.push(expandRect(rect, width, height, 0.15));
-  }
-
-  return boxes;
+function toNormalized(rect: Rect, width: number, height: number): NormalizedBox {
+  return {
+    x: rect.left / width,
+    y: rect.top / height,
+    width: (rect.right - rect.left) / width,
+    height: (rect.bottom - rect.top) / height,
+  };
 }
 
-function buildRegions(objResp: any, width: number, height: number): SharpRegion[] {
-  const minArea = width * height * 0.005;
-  const minDim = Math.min(width, height) * 0.1;
-
-  const rawRects = collectCandidateRects(objResp, width, height);
-  const candidateRects = rawRects.filter((rect, idx, arr) => {
-    const area = rectArea(rect);
-    return !arr.some((other, jdx) => {
-      if (idx === jdx) return false;
-      const overlap = intersectionArea(rect, other);
-      const otherArea = rectArea(other);
-      return overlap > 0 && (overlap / area >= 0.9 || overlap / otherArea >= 0.9);
-    });
-  });
-
-  if (candidateRects.length === 0) {
-    const fallback = rectToRegion({ left: 0, top: 0, right: width, bottom: height }, width, height);
-    return fallback ? [fallback] : [];
+async function getDetector() {
+  if (!detectorPromise) {
+    detectorPromise = pipeline('zero-shot-object-detection', 'Xenova/owlvit-base-patch32');
   }
-
-  const merged = mergeRects(candidateRects, 0.5)
-    .map((rect) => ({
-      left: rect.left,
-      top: rect.top,
-      right: rect.right,
-      bottom: rect.bottom,
-    }))
-    .filter((rect) => {
-      const area = rectArea(rect);
-      const w = rect.right - rect.left;
-      const h = rect.bottom - rect.top;
-      return area >= minArea && w >= minDim && h >= minDim;
-    })
-    .sort((a, b) => rectArea(b) - rectArea(a));
-
-  const regions = merged
-    .map((rect) => rectToRegion(rect, width, height))
-    .filter((region): region is SharpRegion => Boolean(region))
-    .slice(0, 8);
-
-  if (regions.length === 0) {
-    const fallback = rectToRegion({ left: 0, top: 0, right: width, bottom: height }, width, height);
-    return fallback ? [fallback] : [];
-  }
-
-  return regions.sort((a, b) => a.left - b.left);
+  return detectorPromise;
 }
 
-const openai = process.env.OPENAI_API_KEY
-  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-  : null;
+function applyPerLabelNms(regions: DetectionRegion[]) {
+  const buckets = new Map<string, DetectionRegion[]>();
+  for (const region of regions) {
+    const key = region.label || 'unknown';
+    const list = buckets.get(key);
+    if (list) {
+      list.push(region);
+    } else {
+      buckets.set(key, [region]);
+    }
+  }
 
-async function searchOFF(terms: string) {
+  const results: DetectionRegion[] = [];
+  for (const [, items] of buckets) {
+    const sorted = [...items].sort((a, b) => b.score - a.score);
+    const kept: DetectionRegion[] = [];
+    for (const candidate of sorted) {
+      const overlaps = kept.some((existing) => iou(existing.rect, candidate.rect) >= MERGE_IOU_THRESHOLD);
+      if (!overlaps) {
+        kept.push(candidate);
+      }
+    }
+    results.push(...kept);
+  }
+
+  return results.sort((a, b) => b.score - a.score).slice(0, MAX_DETECTIONS);
+}
+
+function rectContains(inner: Rect, outer: Rect, cushion = 4) {
+  return (
+    inner.left >= outer.left - cushion &&
+    inner.top >= outer.top - cushion &&
+    inner.right <= outer.right + cushion &&
+    inner.bottom <= outer.bottom + cushion
+  );
+}
+
+function removeNestedDetections(regions: DetectionRegion[]) {
+  const sorted = [...regions].sort((a, b) => b.score - a.score);
+  const filtered: DetectionRegion[] = [];
+  for (let i = 0; i < sorted.length; i += 1) {
+    const candidate = sorted[i];
+    const isNested = filtered.some((keeper) => rectContains(candidate.rect, keeper.rect));
+    const wrapsExisting = filtered.some((keeper) => rectContains(keeper.rect, candidate.rect));
+    if (!isNested && !wrapsExisting) {
+      filtered.push(candidate);
+    }
+  }
+  return filtered;
+}
+
+async function detectFocusRegions(
+  image: Sharp,
+  points: FocusPoint[],
+  width: number,
+  height: number,
+) {
+  const aggregated: DetectionRegion[] = [];
+  for (let index = 0; index < points.length; index += 1) {
+    const point = points[index];
+    const focusX = clamp(point.x, 0, 1) * width;
+    const focusY = clamp(point.y, 0, 1) * height;
+    const baseSize = Math.round(Math.min(width, height) * FOCUS_REGION_SCALE);
+    const half = Math.max(40, Math.round(baseSize / 2));
+    const left = clamp(Math.round(focusX - half), 0, width - 1);
+    const top = clamp(Math.round(focusY - half), 0, height - 1);
+    const right = clamp(Math.round(focusX + half), left + 1, width);
+    const bottom = clamp(Math.round(focusY + half), top + 1, height);
+    const cropWidth = clamp(right - left, 1, width - left);
+    const cropHeight = clamp(bottom - top, 1, height - top);
+
+    try {
+      const cropBuffer = await image
+        .clone()
+        .extract({
+          left,
+          top,
+          width: cropWidth,
+          height: cropHeight,
+        })
+        .toBuffer();
+
+      const cropSharp = sharp(cropBuffer);
+      const cropInput = await prepareDetectionInput(cropSharp, cropBuffer, cropWidth, cropHeight);
+      const focusDetections = await detectRegions(
+        cropInput.buffer,
+        cropInput.width,
+        cropInput.height,
+        cropWidth,
+        cropHeight,
+        cropInput.scaleX,
+        cropInput.scaleY,
+        FOCUS_DETECTION_MIN_SCORE,
+        false,
+      );
+
+      for (const detection of focusDetections) {
+        const offsetRect: Rect = {
+          left: detection.rect.left + left,
+          top: detection.rect.top + top,
+          right: detection.rect.right + left,
+          bottom: detection.rect.bottom + top,
+        };
+        aggregated.push({
+          ...detection,
+          id: `${detection.id}-focus-${index}`,
+          rect: offsetRect,
+          normalized: toNormalized(offsetRect, width, height),
+        });
+      }
+    } catch (err) {
+      console.error('Focus detection error', (err as Error).message);
+    }
+  }
+
+  return aggregated;
+}
+
+async function detectRegions(
+  imageBuffer: Buffer,
+  detectorWidth: number,
+  detectorHeight: number,
+  originalWidth: number,
+  originalHeight: number,
+  scaleX: number,
+  scaleY: number,
+  minScore: number,
+  allowFallback = true,
+) {
+  if (!detectorWidth || !detectorHeight || !originalWidth || !originalHeight) {
+    return [];
+  }
+  const detector = await getDetector();
+  let detections: Array<{
+    score: number;
+    label: string;
+    box: { xmin: number; ymin: number; xmax: number; ymax: number };
+  }> = [];
+
   try {
+    const arrayBuffer = imageBuffer.buffer.slice(
+      imageBuffer.byteOffset,
+      imageBuffer.byteOffset + imageBuffer.byteLength,
+    ) as ArrayBuffer;
+    const rawImage = await RawImage.read(new Blob([arrayBuffer]));
+    detections = await detector(rawImage, DETECTION_PROMPTS, {
+      device: 'cpu',
+      topk: DETECTION_CONFIG.topK,
+    });
+  } catch (err) {
+    console.error('OWL-ViT detection error', err);
+  }
+
+  const sx = Number.isFinite(scaleX) && scaleX > 0 ? scaleX : originalWidth / detectorWidth;
+  const sy = Number.isFinite(scaleY) && scaleY > 0 ? scaleY : originalHeight / detectorHeight;
+  const regions = detections
+    .filter((det) => det.score >= minScore)
+    .map((det, index) => {
+      const rect = toRect(det.box, detectorWidth, detectorHeight);
+      const scaledRect: Rect = {
+        left: rect.left * sx,
+        top: rect.top * sy,
+        right: rect.right * sx,
+        bottom: rect.bottom * sy,
+      };
+      return {
+        id: `owl-${index}`,
+        label: det.label,
+        score: det.score,
+        rect: scaledRect,
+        normalized: toNormalized(scaledRect, originalWidth, originalHeight),
+      };
+    });
+
+  const deduped = applyPerLabelNms(regions);
+  const cleaned = removeNestedDetections(deduped);
+  if (cleaned.length > 0) {
+    return cleaned;
+  }
+
+  if (!allowFallback) {
+    return [];
+  }
+
+  const fallbackRect: Rect = { left: 0, top: 0, right: originalWidth, bottom: originalHeight };
+  return [
+    {
+      id: 'owl-fallback',
+      label: FALLBACK_LABEL,
+      score: 1,
+      rect: fallbackRect,
+      normalized: toNormalized(fallbackRect, originalWidth, originalHeight),
+    },
+  ];
+}
+
+function cleanLines(text: string) {
+  const seen = new Set<string>();
+  const lines: string[] = [];
+
+  for (const rawLine of text.split(/\r?\n/)) {
+    const sanitized = rawLine.replace(/[^\w\s./-]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!sanitized) continue;
+    const alnum = sanitized.replace(/[^a-z0-9]/gi, '');
+    if (alnum.length < OCR_MIN_LINE_LENGTH) continue;
+    if (/^([a-z0-9])\1{2,}$/i.test(alnum)) continue;
+    const key = sanitized.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    lines.push(sanitized);
+    if (lines.length >= 8) break;
+  }
+
+  return lines;
+}
+
+function evaluateOcrQuality(lines: string[]) {
+  const totalChars = lines.reduce((sum, line) => sum + line.length, 0);
+  if (!lines.length || totalChars < OCR_MIN_TOTAL_CHARS) {
+    return {
+      quality: 'low' as const,
+      message: 'Texto insuficiente. Sube una foto mas nitida o acerca la camara al empaque.',
+    };
+  }
+  return { quality: 'good' as const, message: null };
+}
+
+function extractBarcode(lines: string[]) {
+  for (const line of lines) {
+    const match = line.match(/\b\d{8,14}\b/);
+    if (match) {
+      const value = match[0];
+      if (value.length === 12 || value.length === 13 || value.length === 14) {
+        return value;
+      }
+    }
+  }
+  return null;
+}
+
+const KEYWORD_PATTERNS = [
+  { regex: /\bchips?\b/i, keyword: 'chips' },
+  { regex: /\bpapas?\b/i, keyword: 'chips' },
+  { regex: /\bgalletas?\b/i, keyword: 'cookies' },
+  { regex: /\bcookies?\b/i, keyword: 'cookies' },
+  { regex: /\bbiscuits?\b/i, keyword: 'cookies' },
+  { regex: /\bcereal(?:es)?\b/i, keyword: 'cereal' },
+  { regex: /\byogur?t\b/i, keyword: 'yogurt' },
+  { regex: /\bleche\b/i, keyword: 'milk' },
+  { regex: /\bmilk\b/i, keyword: 'milk' },
+  { regex: /\bchocolate\b/i, keyword: 'chocolate' },
+  { regex: /\bfresa\b/i, keyword: 'strawberry' },
+  { regex: /\bstrawberry\b/i, keyword: 'strawberry' },
+  { regex: /\bvainilla\b/i, keyword: 'vanilla' },
+  { regex: /\bvanilla\b/i, keyword: 'vanilla' },
+  { regex: /\bjuice\b/i, keyword: 'juice' },
+  { regex: /\bjugo\b/i, keyword: 'juice' },
+  { regex: /\bsoda\b/i, keyword: 'soda' },
+  { regex: /\bbebida\b/i, keyword: 'drink' },
+  { regex: /\bbebidas?\b/i, keyword: 'drink' },
+] as const;
+
+type ParsedOcrInfo = {
+  brand: string | null;
+  productName: string | null;
+  keywords: string[];
+  attributes: string[];
+};
+
+function normalizeText(value: string) {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function tokenize(value: string) {
+  const normalized = normalizeText(value);
+  return normalized ? normalized.split(' ').filter(Boolean) : [];
+}
+
+function computeTokenOverlap(a: string[], b: string[]) {
+  if (!a.length || !b.length) return 0;
+  const setB = new Set(b);
+  let matches = 0;
+  for (const token of a) {
+    if (setB.has(token)) matches += 1;
+  }
+  return matches / Math.max(a.length, b.length);
+}
+
+function parseOcrInfo(lines: string[]): ParsedOcrInfo {
+  if (!lines.length) {
+    return { brand: null, productName: null, keywords: [], attributes: [] };
+  }
+
+  const [firstLine = '', secondLine = ''] = lines;
+  let brand: string | null = null;
+  let productName: string | null = null;
+
+  const firstTokens = firstLine.split(/\s+/);
+  const uppercaseLetters = firstLine.replace(/[^A-Z]/g, '').length;
+  const letters = firstLine.replace(/[^A-Za-z]/g, '').length;
+  const uppercaseRatio = letters > 0 ? uppercaseLetters / letters : 0;
+  if (firstTokens.length <= 3 && uppercaseRatio >= 0.6) {
+    brand = firstLine;
+  } else if (firstTokens.length <= 2 && firstLine.length <= 15) {
+    brand = firstLine;
+  }
+
+  if (brand) {
+    productName = [secondLine, lines[2] ?? ''].filter(Boolean).join(' ').trim() || null;
+  } else {
+    productName = lines.slice(0, 2).join(' ').trim() || null;
+    if (firstTokens.length <= 2) {
+      brand = firstLine;
+    }
+  }
+
+  const keywordsSet = new Set<string>();
+  const attributesSet = new Set<string>();
+
+  for (const line of lines) {
+    for (const { regex, keyword } of KEYWORD_PATTERNS) {
+      if (regex.test(line)) {
+        keywordsSet.add(keyword);
+      }
+    }
+    const attrMatches = line.match(/\b\d{2,4}\s?(?:g|gr|kg|ml|l|oz|%|cal(?:orias)?)\b/gi);
+    if (attrMatches) {
+      attrMatches.forEach((match) => attributesSet.add(match.toLowerCase()));
+    }
+  }
+
+  return {
+    brand,
+    productName,
+    keywords: Array.from(keywordsSet),
+    attributes: Array.from(attributesSet),
+  };
+}
+
+function buildSearchCandidates(lines: string[], parsed: ParsedOcrInfo) {
+  const candidates = new Set<string>();
+
+  const joinTop = (count: number) => lines.slice(0, count).join(' ').trim();
+  const topTwo = joinTop(2);
+  const topThree = joinTop(3);
+  if (topTwo) candidates.add(topTwo);
+  if (topThree) candidates.add(topThree);
+
+  if (parsed.brand && parsed.productName) {
+    candidates.add(`${parsed.brand} ${parsed.productName}`);
+  }
+  if (parsed.productName) {
+    candidates.add(parsed.productName);
+  }
+  if (parsed.brand) {
+    candidates.add(parsed.brand);
+  }
+
+  for (const keyword of parsed.keywords) {
+    if (parsed.brand) candidates.add(`${parsed.brand} ${keyword}`);
+    if (parsed.productName) candidates.add(`${parsed.productName} ${keyword}`);
+    candidates.add(keyword);
+  }
+
+  for (const attribute of parsed.attributes) {
+    if (parsed.productName) candidates.add(`${parsed.productName} ${attribute}`);
+    candidates.add(attribute);
+  }
+
+  return Array.from(candidates).map((candidate) => candidate.trim()).filter(Boolean);
+}
+
+async function lookupByBarcode(barcode: string) {
+  if (!barcode) return null;
+  const cached = offBarcodeCache.get(barcode);
+  if (cached !== undefined) {
+    return cached;
+  }
+  try {
+    const base = process.env.OPENFOODFACTS_PRODUCT_URL || 'https://world.openfoodfacts.org/api/v2/product';
+    const res = await fetch(`${base}/${encodeURIComponent(barcode)}.json`, { cache: 'no-store' });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { status: number; product?: OffProduct };
+    if (data.status === 1 && data.product) {
+      offBarcodeCache.set(barcode, data.product);
+      return data.product;
+    }
+  } catch (err) {
+    console.error('OpenFoodFacts barcode error', (err as Error).message);
+  }
+  offBarcodeCache.set(barcode, null);
+  return null;
+}
+
+async function searchOpenFoodFacts(query: string) {
+  const trimmed = query.trim();
+  if (!trimmed) return [];
+  const cacheKey = trimmed.toLowerCase();
+  const cached = offSearchCache.get(cacheKey);
+  if (cached) return cached;
+  try {
+    const base = process.env.OPENFOODFACTS_SEARCH_URL || 'https://world.openfoodfacts.org/cgi/search.pl';
     const params = new URLSearchParams({
-      search_terms: terms,
+      search_terms: trimmed,
       search_simple: '1',
       action: 'process',
       json: '1',
+      page_size: '20',
+      fields: 'code,product_name,brands,image_url,image_front_url,url,categories_tags,generic_name',
     });
-    const res = await fetch(`${OFF_SEARCH_URL}?${params}`, { cache: 'no-store' });
+    const res = await fetch(`${base}?${params}`, { cache: 'no-store' });
     if (!res.ok) return null;
     const data = await res.json();
-    return data.count > 0 ? data : null;
+    const products = Array.isArray(data.products) ? (data.products as OffProduct[]) : [];
+    offSearchCache.set(cacheKey, products);
+    return products;
   } catch (err) {
-    console.error('Error al conectar con OpenFoodFacts:', (err as Error).message);
-    return null;
+    console.error('OpenFoodFacts search error', (err as Error).message);
+    return [];
   }
+}
+
+type OffMatchResult = {
+  product: OffProduct | null;
+  confidence: number;
+  source: 'barcode' | 'search' | null;
+  usedQuery: string | null;
+  alternatives: OffProduct[];
+};
+
+function scoreOffProduct(product: OffProduct, parsed: ParsedOcrInfo, lines: string[]) {
+  let score = 0;
+  const productNameTokens = tokenize(product.product_name ?? '');
+  const ocrNameTokens = parsed.productName ? tokenize(parsed.productName) : tokenize(lines.join(' '));
+  const brandTokens = tokenize(product.brands ?? '');
+  const ocrBrandTokens = parsed.brand ? tokenize(parsed.brand) : [];
+
+  if (ocrNameTokens.length && productNameTokens.length) {
+    score += computeTokenOverlap(ocrNameTokens, productNameTokens) * 0.6;
+  }
+
+  if (ocrBrandTokens.length && brandTokens.length) {
+    score += computeTokenOverlap(ocrBrandTokens, brandTokens) * 0.3;
+  }
+
+  if (parsed.keywords.length) {
+    const categories = Array.isArray((product as any).categories_tags)
+      ? ((product as any).categories_tags as string[])
+      : typeof (product as any).categories_tags === 'string'
+      ? [(product as any).categories_tags as string]
+      : [];
+    const keywordMatches = parsed.keywords.filter((keyword) => {
+      const normalizedKeyword = normalizeText(keyword);
+      return (
+        productNameTokens.includes(normalizedKeyword) ||
+        brandTokens.includes(normalizedKeyword) ||
+        categories.some((cat) => normalizeText(cat).includes(normalizedKeyword))
+      );
+    });
+    if (keywordMatches.length) {
+      score += (keywordMatches.length / parsed.keywords.length) * 0.1;
+    }
+  }
+
+  return Math.min(1, score);
+}
+
+async function resolveOffProduct(
+  lines: string[],
+  barcode: string | null,
+  parsed: ParsedOcrInfo,
+  candidates: string[],
+): Promise<OffMatchResult> {
+  if (barcode) {
+    const product = await lookupByBarcode(barcode);
+    if (product) {
+      return {
+        product,
+        confidence: 0.95,
+        source: 'barcode',
+        usedQuery: `barcode:${barcode}`,
+        alternatives: [],
+      };
+    }
+  }
+
+  const seen = new Map<string, { product: OffProduct; score: number; query: string }>();
+
+  for (const candidate of candidates) {
+    const products = await searchOpenFoodFacts(candidate);
+    if (!products.length) continue;
+
+    for (const product of products) {
+      const codeKey = product.code ?? `${product.product_name ?? ''}-${product.brands ?? ''}`;
+      const normalizedKey = codeKey.toLowerCase();
+      const score = scoreOffProduct(product, parsed, lines);
+      const previous = seen.get(normalizedKey);
+      if (!previous || score > previous.score) {
+        seen.set(normalizedKey, { product, score, query: candidate });
+      }
+    }
+
+    const bestCandidate = [...seen.values()].sort((a, b) => b.score - a.score)[0];
+    if (bestCandidate && bestCandidate.score >= OFF_CONFIDENCE_THRESHOLD) {
+      break;
+    }
+  }
+
+  if (!seen.size) {
+    return {
+      product: null,
+      confidence: 0,
+      source: null,
+      usedQuery: null,
+      alternatives: [],
+    };
+  }
+
+  const ranked = [...seen.values()].sort((a, b) => b.score - a.score);
+  const [best, ...rest] = ranked;
+  const alternatives = rest.slice(0, OFF_MAX_CANDIDATES).map((item) => item.product);
+
+  return {
+    product: best.product,
+    confidence: Math.min(1, best.score),
+    source: 'search',
+    usedQuery: best.query,
+    alternatives,
+  };
+}
+
+function buildTitle(product: OffProduct | null, lines: string[]) {
+  if (product?.product_name) return product.product_name;
+  if (lines.length >= 2) return `${lines[0]} ${lines[1]}`.trim();
+  if (lines.length === 1) return lines[0];
+  return 'Producto detectado';
+}
+
+async function recogniseText(buffer: Buffer, languageHints: string[]) {
+  try {
+    const prepared = await preprocessForOcr(buffer);
+    const hints = toLanguageHints(languageHints);
+    const [result] = await visionClient.documentTextDetection({
+      image: { content: prepared },
+      imageContext: hints.length ? { languageHints: hints } : undefined,
+    });
+    const text =
+      result.fullTextAnnotation?.text ??
+      (result.textAnnotations && result.textAnnotations.length > 0 ? result.textAnnotations[0]?.description : '') ??
+      '';
+    return text;
+  } catch (err) {
+    console.error('Google Vision OCR error', (err as Error).message);
+    return '';
+  }
+}
+
+function encodeEvent(payload: Record<string, unknown>) {
+  return `${JSON.stringify(payload)}\n`;
 }
 
 export async function POST(req: NextRequest) {
   const formData = await req.formData();
-  const image = formData.get('image');
-  if (!image || !(image instanceof File)) {
+  const imageFile = formData.get('image');
+  if (!imageFile || !(imageFile instanceof File)) {
     return new Response(JSON.stringify({ error: 'No file uploaded' }), { status: 400 });
   }
 
-  const arrayBuffer = await image.arrayBuffer();
+  const incomingLang = formData.get('lang') ?? process.env.OCR_LANGS ?? 'spa+eng';
+  const languages = normalizeLangs(incomingLang, 'spa+eng');
+  const languageHints = languages.length ? languages : ['spa', 'eng'];
+  const focusRaw = formData.get('focus');
+  const focusPoints = parseFocusPoints(focusRaw);
+
+  const arrayBuffer = await imageFile.arrayBuffer();
   const buffer = Buffer.from(arrayBuffer);
-
-  if (process.env.NODE_ENV !== 'production') {
-    process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+  const image = sharp(buffer);
+  const meta = await image.metadata();
+  const width = meta.width ?? 0;
+  const height = meta.height ?? 0;
+  if (!width || !height) {
+    return new Response(JSON.stringify({ error: 'Invalid image' }), { status: 400 });
   }
 
-  const encoder = new TextEncoder();
+  const detectionInput = await prepareDetectionInput(image, buffer, width, height);
 
-  const client = ensureVisionClient();
-  if (!client) {
-    const message =
-      visionInitError?.message ||
-      'Google Vision no esta configurado. Configura las credenciales para usar la camara.';
-    return new Response(JSON.stringify({ error: message }), { status: 503 });
-  }
+  const mimeType = meta.format === 'png' ? 'image/png' : 'image/jpeg';
+  const imageDataUrl = `data:${mimeType};base64,${buffer.toString('base64')}`;
 
   const stream = new ReadableStream({
-    start: async (controller) => {
+    async start(controller) {
+      const encoder = new TextEncoder();
       try {
-        // 1) Localizar objetos
-        let objResp: any;
-        try {
-          [objResp] = await client.annotateImage({
-            image: { content: buffer },
-            features: [
-              { type: 'OBJECT_LOCALIZATION', maxResults: 50 },
-              { type: 'LOGO_DETECTION', maxResults: 15 },
-              { type: 'DOCUMENT_TEXT_DETECTION' },
-              { type: 'BARCODE_DETECTION', maxResults: 15 },
-              { type: 'CROP_HINTS', maxResults: 8 },
-            ],
-          });
-        } catch (err) {
-          const error = err as Error;
-          visionInitError = error;
-          const message = error.message.includes('Could not load the default credentials')
-            ? 'Google Vision no tiene credenciales configuradas. Revisa las variables de entorno.'
-            : `Google Vision: ${error.message}`;
-          controller.enqueue(
-            encoder.encode(
-              JSON.stringify({ error: message }) + '\n',
-            ),
-          );
-          controller.close();
-          return;
-        }
-
-        const { width = 0, height = 0 } = await sharp(buffer).metadata();
-        const regions = buildRegions(objResp, width, height);
-
-        if (process.env.NODE_ENV !== 'production') {
-          console.log('[camera] regions detected', regions.length);
-        }
-
         controller.enqueue(
           encoder.encode(
-            JSON.stringify({ type: 'count', count: regions.length }) + '\n',
+            encodeEvent({
+              type: 'image',
+              image: imageDataUrl,
+              width,
+              height,
+            }),
           ),
         );
 
-        for (let idx = 0; idx < regions.length; idx++) {
-          const region = regions[idx];
-          let cropBuffer: Buffer;
-          try {
-            cropBuffer = await sharp(buffer).extract(region).toBuffer();
-          } catch {
-            controller.enqueue(
-              encoder.encode(
-                JSON.stringify({
-                  type: 'product',
-                  index: idx,
-                  aiResponse: 'error',
-                  title: 'Error',
-                  offImage: null,
-                  offLink: null,
-                  code: null,
-                }) + '\n',
-              ),
-            );
-            continue;
-          }
+        let regions = await detectRegions(
+          detectionInput.buffer,
+          detectionInput.width,
+          detectionInput.height,
+          width,
+          height,
+          detectionInput.scaleX,
+          detectionInput.scaleY,
+          DETECTION_CONFIG.minScore,
+          true,
+        );
 
-          // 2) Analizar recorte
-          let vResp: any;
-          try {
-            [vResp] = await client.annotateImage({
-              image: { content: cropBuffer },
-              features: [
-                { type: 'BARCODE_DETECTION' },
-                { type: 'LOGO_DETECTION', maxResults: 5 },
-                { type: 'DOCUMENT_TEXT_DETECTION' },
-                { type: 'WEB_DETECTION', maxResults: 5 },
-                { type: 'LABEL_DETECTION', maxResults: 10 },
-                { type: 'OBJECT_LOCALIZATION' },
-              ],
-            });
-          } catch (err) {
-            const error = err as Error;
-            if (error.message.includes('Could not load the default credentials')) {
-              visionInitError = error;
-            }
-            console.error('Error Vision en recorte:', error.message);
-            continue;
-          }
-
-          // 3) Parsear resultados de Vision
-          const barcodes = (vResp.barcodeAnnotations || []).map((b: any) => b.rawValue);
-          const logos = (vResp.logoAnnotations || []).map((l: any) => ({
-            name: l.description,
-            score: l.score,
-          }));
-          const text = vResp.fullTextAnnotation?.text?.trim() || '';
-          const webEnts = (vResp.webDetection?.webEntities || []).map((e: any) => ({
-            desc: e.description,
-            score: e.score,
-          }));
-          const labels = (vResp.labelAnnotations || []).map((l: any) => ({
-            desc: l.description,
-            score: l.score,
-          }));
-          const objs = (vResp.localizedObjectAnnotations || []).map((o: any) => o.name);
-
-          const visionData = { barcodes, logos, text, webEnts, labels, objects: objs };
-
-          // 4) Prompt para OpenAI
-          let aiResponse = '';
-          if (openai) {
-            const prompt = `
-    Eres un asistente en ESPAÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‹Å“OL experto en productos alimenticios. Recibes un JSON con datos de Google Vision sobre un envase.
-Tu tarea es devolver SOLO el tÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©rmino de bÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Âºsqueda mÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡s corto y ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Âºtil para buscar ese producto en OpenFoodFacts.
-
-    ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ REGLAS CLARAS:
-    1. Usa el texto OCR (\`text\`) como fuente PRINCIPAL para identificar el nombre genÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©rico.
-       - Si hay varias lÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â­neas, elige la mÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡s descriptiva en ESPAÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‹Å“OL que indique quÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â© es el producto.
-       - Omite frases de marketing, ingredientes o instrucciones.
-    2. Solo incluye la marca si aparece en \`logos\`.
-    3. El resultado debe estar en SINGULAR, sin sabores, variantes ni cantidades.
-    4. Si el nombre genÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©rico estÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡ en otro idioma, TRADÃƒÆ’Ã†â€™Ãƒâ€¦Ã‚Â¡CELO al espaÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â±ol.
-    5. Usa \`webEnts\` y \`labels\` solo como APOYO para confirmar el OCR, NUNCA como reemplazo.
-    6. No inventes datos. Si no estÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡ claro, deja fuera esa parte.
-    7. Devuelve SOLO el tÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©rmino limpio, sin comillas ni explicaciones.
-
-    ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ EJEMPLOS:
-    - "Barritas ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Ântegra de ProteÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â­na con ArÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡ndanos y Semillas" ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ Barrita ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Ântegra
-    - "Font Vella Agua Mineral Natural" (con logo Font Vella) ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ Font Vella Agua Mineral
-    - "NestlÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â© Chocolate KitKat 4 barras" (con logo KitKat) ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ KitKat
-
-    Ahora, procesa este JSON y devuelve SOLO la lÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â­nea con el tÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©rmino final (sin comillas ni nada mÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡s):
-
-    \`\`\`json
-    ${JSON.stringify(visionData, null, 2)}
-    \`\`\`
-    `.trim();
-
-            try {
-              const aiRes = await openai.chat.completions.create({
-                model: 'gpt-4o-mini',
-                messages: [
-                  {
-                    role: 'system',
-                    content:
-                      'Eres un asistente que genera tÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©rminos de bÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Âºsqueda para OpenFoodFacts, en espaÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â±ol y con marcas reales.',
-                  },
-                  { role: 'user', content: prompt },
-                ],
-                temperature: 0.2,
-                max_tokens: 32,
-              });
-              aiResponse = aiRes.choices[0].message?.content?.trim() || '';
-            } catch (err) {
-              console.error('Error al conectar con OpenAI:', err);
-            }
-          }
-
-          // 5) Consultar OpenFoodFacts
-          let offData: any = null;
-          for (const code of barcodes) {
-            try {
-              const byCodeRes = await fetch(
-                `${OFF_PROD_URL}/${encodeURIComponent(code)}.json`,
-              );
-              if (byCodeRes.ok) {
-                const byCode = await byCodeRes.json();
-                if (byCode.status === 1) {
-                  offData = byCode.product;
-                  break;
-                }
-              }
-            } catch (err) {
-              console.error(
-                'Error en OpenFoodFacts por cÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â³digo de barras:',
-                (err as Error).message,
-              );
-            }
-          }
-
-          if (!offData && aiResponse) {
-            const offSearch = await searchOFF(aiResponse);
-            if (offSearch) {
-              offData = offSearch.products?.[0] || offSearch;
-            }
-          }
-
-          const offLink =
-            offData?.url || (offData?.code ? `${OFF_PROD_URL}/${offData.code}` : null);
-          const offImage = offData?.image_url || offData?.image_front_url || null;
-          const title = offData?.product_name || aiResponse;
-          const code =
-            typeof offData?.code === 'string' && offData.code.trim().length > 0
-              ? offData.code
-              : barcodes.find(Boolean) || null;
-
-          controller.enqueue(
-            encoder.encode(
-              JSON.stringify({
-                type: 'product',
-                index: idx,
-                aiResponse,
-                title,
-                offImage,
-                offLink,
-                code,
-              }) + '\n',
-            ),
+        if (regions.length <= 1) {
+          const relaxedDetections = await detectRegions(
+            detectionInput.buffer,
+            detectionInput.width,
+            detectionInput.height,
+            width,
+            height,
+            detectionInput.scaleX,
+            detectionInput.scaleY,
+            FOCUS_DETECTION_MIN_SCORE,
+            false,
           );
+          if (relaxedDetections.length) {
+            regions = removeNestedDetections(applyPerLabelNms([...regions, ...relaxedDetections]));
+          }
+        }
+
+        if (focusPoints.length) {
+          const focusDetections = await detectFocusRegions(image, focusPoints, width, height);
+          if (focusDetections.length) {
+            regions = removeNestedDetections(applyPerLabelNms([...regions, ...focusDetections]));
+          }
         }
 
         controller.enqueue(
-          encoder.encode(JSON.stringify({ type: 'done' }) + '\n'),
+          encoder.encode(
+            encodeEvent({
+              type: 'boxes',
+              boxes: regions.map((region) => ({
+                id: region.id,
+                label: region.label,
+                score: region.score,
+                box: region.normalized,
+              })),
+              minScore: DETECTION_CONFIG.minScore,
+              focusCount: focusPoints.length,
+              detectionCount: regions.length,
+            }),
+          ),
         );
+
+        if (!regions.length) {
+          controller.enqueue(
+            encoder.encode(
+              encodeEvent({
+                type: 'no-products',
+                message:
+                  'No se detectaron productos en la imagen. Intenta acercar la camara o mejorar la iluminacion.',
+              }),
+            ),
+          );
+          controller.enqueue(encoder.encode(encodeEvent({ type: 'done' })));
+          return;
+        }
+
+        regions.forEach((region, index) => {
+          controller.enqueue(
+            encoder.encode(
+              encodeEvent({
+                type: 'product-progress',
+                index,
+                status: 'pending',
+                score: region.score,
+                prompt: region.label,
+                boxId: region.id,
+                boundingBox: region.normalized,
+              }),
+            ),
+          );
+        });
+
+        const handleRegion = async (region: DetectionRegion, index: number) => {
+          controller.enqueue(
+            encoder.encode(
+              encodeEvent({
+                type: 'product-progress',
+                index,
+                status: 'processing',
+                score: region.score,
+                prompt: region.label,
+                boxId: region.id,
+                boundingBox: region.normalized,
+              }),
+            ),
+          );
+
+          try {
+            const cropBuffer = await image
+              .clone()
+              .extract({
+                left: Math.max(0, Math.floor(region.rect.left)),
+                top: Math.max(0, Math.floor(region.rect.top)),
+                width: Math.max(1, Math.floor(region.rect.right - region.rect.left)),
+                height: Math.max(1, Math.floor(region.rect.bottom - region.rect.top)),
+              })
+              .toBuffer();
+
+            const rawText = await recogniseText(cropBuffer, languageHints);
+            const lines = cleanLines(rawText);
+            const quality = evaluateOcrQuality(lines);
+            const barcode = extractBarcode(lines);
+            const parsedInfo = parseOcrInfo(lines);
+            const candidates = buildSearchCandidates(lines, parsedInfo);
+            const candidateQueries =
+              candidates.length > 0 ? candidates : lines.length ? [lines.join(' ')] : [];
+
+            if (quality.quality === 'low') {
+              controller.enqueue(
+                encoder.encode(
+                  encodeEvent({
+                    type: 'product',
+                    index,
+                    status: 'low-ocr',
+                    aiResponse: lines.join('\n') || undefined,
+                    message: quality.message,
+                    barcode: barcode ?? null,
+                    brandCandidate: parsedInfo.brand,
+                    productCandidate: parsedInfo.productName,
+                    keywords: parsedInfo.keywords,
+                    attributes: parsedInfo.attributes,
+                    searchCandidates: candidateQueries,
+                    searchQuery: candidateQueries[0] ?? null,
+                    score: region.score,
+                    prompt: region.label,
+                    boxId: region.id,
+                    boundingBox: region.normalized,
+                  }),
+                ),
+              );
+              return;
+            }
+
+            const offResult = await resolveOffProduct(lines, barcode, parsedInfo, candidateQueries);
+            const title = buildTitle(offResult.product, lines);
+            const alternatives =
+              offResult.alternatives.slice(0, OFF_MAX_CANDIDATES).map((item) => ({
+                code: item.code ?? null,
+                name: item.product_name ?? null,
+                brands: item.brands ?? null,
+                link: item.url ?? null,
+              })) ?? [];
+
+            controller.enqueue(
+              encoder.encode(
+                encodeEvent({
+                  type: 'product',
+                  index,
+                  status: offResult.product ? 'ready' : 'no-match',
+                  title,
+                  aiResponse: lines.join('\n') || undefined,
+                  offImage: offResult.product?.image_url || offResult.product?.image_front_url || null,
+                  offLink: offResult.product?.url || null,
+                  code: offResult.product?.code || barcode || null,
+                  barcode: barcode ?? null,
+                  searchQuery: offResult.usedQuery ?? candidateQueries[0] ?? null,
+                  offConfidence: offResult.confidence,
+                  offSource: offResult.source,
+                  offAlternatives: alternatives,
+                  brandCandidate: parsedInfo.brand,
+                  productCandidate: parsedInfo.productName,
+                  keywords: parsedInfo.keywords,
+                  attributes: parsedInfo.attributes,
+                  searchCandidates: candidateQueries,
+                  score: region.score,
+                  prompt: region.label,
+                  boxId: region.id,
+                  boundingBox: region.normalized,
+                }),
+              ),
+            );
+          } catch (regionErr) {
+            console.error('Camera product error', (regionErr as Error).message);
+            controller.enqueue(
+              encoder.encode(
+                encodeEvent({
+                  type: 'product',
+                  index,
+                  status: 'error',
+                  message: (regionErr as Error).message ?? 'Error analizando el producto',
+                  brandCandidate: null,
+                  productCandidate: null,
+                  keywords: [],
+                  attributes: [],
+                  searchCandidates: [],
+                  score: region.score,
+                  prompt: region.label,
+                  boxId: region.id,
+                  boundingBox: region.normalized,
+                }),
+              ),
+            );
+          }
+        };
+
+        let cursor = 0;
+        const workerCount = Math.min(MAX_OCR_CONCURRENCY, regions.length);
+        await Promise.all(
+          Array.from({ length: workerCount }).map(async () => {
+            while (true) {
+              const current = cursor;
+              if (current >= regions.length) break;
+              cursor += 1;
+              const region = regions[current];
+              await handleRegion(region, current);
+            }
+          }),
+        );
+
+        controller.enqueue(encoder.encode(encodeEvent({ type: 'done' })));
       } catch (err) {
+        console.error('Camera pipeline error', err);
         controller.enqueue(
           encoder.encode(
-            JSON.stringify({ error: (err as Error).message || 'Internal error' }) +
-              '\n',
+            encodeEvent({ type: 'error', message: (err as Error).message ?? 'Unexpected error' }),
           ),
         );
       } finally {
@@ -603,6 +1134,3 @@ Tu tarea es devolver SOLO el tÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©rmino de
     headers: { 'Content-Type': 'application/x-ndjson' },
   });
 }
-
-
-
