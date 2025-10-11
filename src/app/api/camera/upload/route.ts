@@ -1,7 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest } from 'next/server';
 import sharp, { type Sharp } from 'sharp';
-import { pipeline, RawImage } from '@huggingface/transformers';
 import vision from '@google-cloud/vision';
 
 export const runtime = 'nodejs';
@@ -76,10 +75,13 @@ type FocusPoint = {
   y: number;
 };
 
+const HF_DETECTION_URL =
+  process.env.HF_DETECTION_URL ?? 'https://api-inference.huggingface.co/models/Xenova/owlvit-base-patch32';
+const HF_API_TOKEN = process.env.HF_API_TOKEN ?? process.env.HUGGINGFACEHUB_API_TOKEN ?? '';
+
 const offBarcodeCache = new Map<string, OffProduct | null>();
 const offSearchCache = new Map<string, OffProduct[]>();
 
-let detectorPromise: Promise<any> | null = null;
 const visionClient = new vision.ImageAnnotatorClient();
 
 function clamp(value: number, min: number, max: number) {
@@ -279,13 +281,6 @@ function toNormalized(rect: Rect, width: number, height: number): NormalizedBox 
   };
 }
 
-async function getDetector() {
-  if (!detectorPromise) {
-    detectorPromise = pipeline('zero-shot-object-detection', 'Xenova/owlvit-base-patch32');
-  }
-  return detectorPromise;
-}
-
 function applyPerLabelNms(regions: DetectionRegion[]) {
   const buckets = new Map<string, DetectionRegion[]>();
   for (const region of regions) {
@@ -404,6 +399,126 @@ async function detectFocusRegions(
   return aggregated;
 }
 
+type HfDetection = {
+  score: number;
+  label: string;
+  box?: { xmin: number; ymin: number; xmax: number; ymax: number };
+  bounding_box?: { x_min: number; y_min: number; x_max: number; y_max: number };
+};
+
+async function callExternalDetection(
+  imageBuffer: Buffer,
+  prompts: readonly string[],
+  topK: number,
+  attempt = 0,
+): Promise<HfDetection[]> {
+  const base64Image = `data:image/jpeg;base64,${imageBuffer.toString('base64')}`;
+  const body = JSON.stringify({
+    inputs: { image: base64Image },
+    parameters: {
+      candidate_labels: prompts,
+      max_detections: topK,
+      top_k: topK,
+    },
+    options: {
+      wait_for_model: true,
+    },
+  });
+
+  const headers: Record<string, string> = {
+    Accept: 'application/json',
+    'Content-Type': 'application/json',
+  };
+  if (HF_API_TOKEN) {
+    headers.Authorization = `Bearer ${HF_API_TOKEN}`;
+  }
+
+  const response = await fetch(HF_DETECTION_URL, {
+    method: 'POST',
+    headers,
+    body,
+  });
+
+  if (response.status === 503 && attempt < 2) {
+    try {
+      const error = (await response.json()) as { estimated_time?: number };
+      const waitSeconds = Number(error?.estimated_time) || 2;
+      await new Promise((resolve) => setTimeout(resolve, waitSeconds * 1000));
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+    return callExternalDetection(imageBuffer, prompts, topK, attempt + 1);
+  }
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(`HF detection failed (${response.status}): ${message}`);
+  }
+
+  const data = (await response.json()) as unknown;
+  if (!Array.isArray(data)) {
+    return [];
+  }
+
+  const detections: HfDetection[] = [];
+  for (const entry of data) {
+    if (Array.isArray(entry)) {
+      entry.forEach((item) => {
+        if (item && typeof item === 'object') detections.push(item as HfDetection);
+      });
+    } else if (entry && typeof entry === 'object') {
+      detections.push(entry as HfDetection);
+    }
+  }
+  return detections;
+}
+
+function mapHfDetections(
+  detections: HfDetection[],
+  detectorWidth: number,
+  detectorHeight: number,
+  scaleX: number,
+  scaleY: number,
+  originalWidth: number,
+  originalHeight: number,
+) {
+  const sx = Number.isFinite(scaleX) && scaleX > 0 ? scaleX : originalWidth / detectorWidth;
+  const sy = Number.isFinite(scaleY) && scaleY > 0 ? scaleY : originalHeight / detectorHeight;
+
+  return detections
+    .filter((det) => typeof det.score === 'number' && typeof det.label === 'string')
+    .map((det, index) => {
+      const box =
+        det.box ??
+        (det.bounding_box
+          ? {
+              xmin: det.bounding_box.x_min,
+              ymin: det.bounding_box.y_min,
+              xmax: det.bounding_box.x_max,
+              ymax: det.bounding_box.y_max,
+            }
+          : null);
+      if (!box) {
+        return null;
+      }
+      const rect = toRect(box, detectorWidth, detectorHeight);
+      const scaledRect: Rect = {
+        left: rect.left * sx,
+        top: rect.top * sy,
+        right: rect.right * sx,
+        bottom: rect.bottom * sy,
+      };
+      return {
+        id: `owl-${index}`,
+        label: det.label,
+        score: det.score ?? 0,
+        rect: scaledRect,
+        normalized: toNormalized(scaledRect, originalWidth, originalHeight),
+      };
+    })
+    .filter((region): region is DetectionRegion => Boolean(region));
+}
+
 async function detectRegions(
   imageBuffer: Buffer,
   detectorWidth: number,
@@ -418,49 +533,24 @@ async function detectRegions(
   if (!detectorWidth || !detectorHeight || !originalWidth || !originalHeight) {
     return [];
   }
-  const detector = await getDetector();
-  let detections: Array<{
-    score: number;
-    label: string;
-    box: { xmin: number; ymin: number; xmax: number; ymax: number };
-  }> = [];
 
+  let detections: DetectionRegion[] = [];
   try {
-    const arrayBuffer = imageBuffer.buffer.slice(
-      imageBuffer.byteOffset,
-      imageBuffer.byteOffset + imageBuffer.byteLength,
-    ) as ArrayBuffer;
-    const rawImage = await RawImage.read(new Blob([arrayBuffer]));
-    detections = await detector(rawImage, DETECTION_PROMPTS, {
-      device: 'cpu',
-      topk: DETECTION_CONFIG.topK,
-    });
+    const hfDetections = await callExternalDetection(imageBuffer, DETECTION_PROMPTS, DETECTION_CONFIG.topK);
+    detections = mapHfDetections(
+      hfDetections,
+      detectorWidth,
+      detectorHeight,
+      scaleX,
+      scaleY,
+      originalWidth,
+      originalHeight,
+    ).filter((det) => det.score >= minScore);
   } catch (err) {
-    console.error('OWL-ViT detection error', err);
+    console.error('External detection error', err);
   }
 
-  const sx = Number.isFinite(scaleX) && scaleX > 0 ? scaleX : originalWidth / detectorWidth;
-  const sy = Number.isFinite(scaleY) && scaleY > 0 ? scaleY : originalHeight / detectorHeight;
-  const regions = detections
-    .filter((det) => det.score >= minScore)
-    .map((det, index) => {
-      const rect = toRect(det.box, detectorWidth, detectorHeight);
-      const scaledRect: Rect = {
-        left: rect.left * sx,
-        top: rect.top * sy,
-        right: rect.right * sx,
-        bottom: rect.bottom * sy,
-      };
-      return {
-        id: `owl-${index}`,
-        label: det.label,
-        score: det.score,
-        rect: scaledRect,
-        normalized: toNormalized(scaledRect, originalWidth, originalHeight),
-      };
-    });
-
-  const deduped = applyPerLabelNms(regions);
+  const deduped = applyPerLabelNms(detections);
   const cleaned = removeNestedDetections(deduped);
   if (cleaned.length > 0) {
     return cleaned;
