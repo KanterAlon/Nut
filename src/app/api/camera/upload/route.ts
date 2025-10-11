@@ -76,7 +76,7 @@ type FocusPoint = {
 };
 
 const HF_DETECTION_URL =
-  process.env.HF_DETECTION_URL ?? 'https://api-inference.huggingface.co/models/Xenova/owlvit-base-patch32';
+  process.env.HF_DETECTION_URL ?? 'https://api-inference.huggingface.co/models/google/owlvit-base-patch32';
 const HF_API_TOKEN = process.env.HF_API_TOKEN ?? process.env.HUGGINGFACEHUB_API_TOKEN ?? '';
 
 const offBarcodeCache = new Map<string, OffProduct | null>();
@@ -412,9 +412,8 @@ async function callExternalDetection(
   topK: number,
   attempt = 0,
 ): Promise<HfDetection[]> {
-  const base64Image = `data:image/jpeg;base64,${imageBuffer.toString('base64')}`;
   const body = JSON.stringify({
-    inputs: { image: base64Image },
+    inputs: imageBuffer.toString('base64'),
     parameters: {
       candidate_labels: prompts,
       max_detections: topK,
