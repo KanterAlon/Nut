@@ -152,10 +152,43 @@ function CameraResultsOverlay() {
   const router = useRouter();
 
   if (!open) return null;
-  };
 
   const handleClose = () => {
     dismissResults();
+  };
+
+  const resolveProductQuery = (product: CameraDetectedProduct) => {
+    const querySources = [
+      product.searchQuery,
+      product.searchCandidates?.find((candidate) => Boolean(candidate?.trim())),
+      product.brandCandidate,
+      product.productCandidate,
+      product.title,
+      product.aiResponse,
+    ];
+
+    return querySources.find((value) => Boolean(value && value.trim()))?.trim() ?? null;
+  };
+
+  const handleDetails = (product: CameraDetectedProduct) => {
+    const trimmedCode = product.code?.trim();
+    if (trimmedCode) {
+      prepareForNavigation();
+      router.push(`/producto?code=${encodeURIComponent(trimmedCode)}`);
+      return;
+    }
+
+    const resolvedQuery = resolveProductQuery(product);
+    if (resolvedQuery) {
+      prepareForNavigation();
+      router.push(`/producto?query=${encodeURIComponent(resolvedQuery)}`);
+      return;
+    }
+
+    if (product.offLink) {
+      dismissResults();
+      window.open(product.offLink, '_blank', 'noopener,noreferrer');
+    }
   };
 
   const formatStatusLabel = (status: CameraDetectedProduct['status']) => {
@@ -297,18 +330,4 @@ function CameraResultsOverlay() {
     </div>
   );
 }
-          </button>
-          <button
-            type="button"
-            className="camera-results-dismiss"
-            onClick={handleClose}
-          >
-            Cerrar
-          </button>
-        </footer>
-      </div>
-    </div>
-  );
-}
-
 
