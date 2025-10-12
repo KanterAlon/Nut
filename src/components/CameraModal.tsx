@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState, MouseEvent } from 'react';
+import { useRef, useState } from 'react';
 import Webcam from 'react-webcam';
 import { FaTimes } from 'react-icons/fa';
 import Loader from './Loader';
@@ -30,25 +30,28 @@ export default function CameraModal({ isOpen, onClose, onCapture }: CameraModalP
     }
   };
 
-  const handleContainerClick = (e: MouseEvent<HTMLDivElement>) => {
-    if ((e.target as HTMLElement).classList.contains('popup-container')) onClose();
-  };
-
   return (
-    <div className="popup-container" onClick={handleContainerClick}>
-      <div className="popup-content" onClick={(e) => e.stopPropagation()}>
-        <button className="close-btn" onClick={onClose} aria-label="Cerrar">
-          <FaTimes />
-        </button>
-        <div className="camera-wrapper">
-          <Webcam
-            audio={false}
-            ref={webcamRef}
-            screenshotFormat="image/jpeg"
-            videoConstraints={{ facingMode: 'environment' }}
-          />
+    <div className="camera-modal-overlay" role="dialog" aria-modal="true" onClick={onClose}>
+      <div className="camera-modal" onClick={(e) => e.stopPropagation()}>
+        <header className="camera-modal-header">
+          <h2>Escanear producto</h2>
+          <button className="camera-modal-close" onClick={onClose} aria-label="Cerrar">
+            <FaTimes />
+          </button>
+        </header>
+        <div className="camera-modal-body">
+          <div className="camera-preview">
+            <Webcam
+              audio={false}
+              ref={webcamRef}
+              screenshotFormat="image/jpeg"
+              videoConstraints={{ facingMode: 'environment' }}
+            />
+          </div>
+          <button className="capture-btn" onClick={capture} disabled={capturing}>
+            {capturing ? 'Buscando...' : 'Tomar foto y buscar'}
+          </button>
         </div>
-        <button className="capture-btn" onClick={capture}>Tomar foto</button>
         {capturing && (
           <div className="capture-loader">
             <Loader />
