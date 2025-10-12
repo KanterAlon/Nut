@@ -79,6 +79,9 @@ const HF_DETECTION_URL =
   process.env.HF_DETECTION_URL ?? 'https://api-inference.huggingface.co/models/google/owlvit-base-patch32';
 const HF_API_TOKEN = process.env.HF_API_TOKEN ?? process.env.HUGGINGFACEHUB_API_TOKEN ?? '';
 
+let externalDetectionEnabled = true;
+let externalDetectionWarning: string | null = null;
+
 class ExternalDetectionUnavailableError extends Error {
   constructor(message: string) {
     super(message);
@@ -762,28 +765,40 @@ async function detectRegions(
   }
 
   let detections: DetectionRegion[] = [];
-  try {
-    const hfDetections = await callExternalDetection(imageBuffer, DETECTION_PROMPTS, DETECTION_CONFIG.topK);
-    detections = mapHfDetections(
-      hfDetections,
-      detectorWidth,
-      detectorHeight,
-      scaleX,
-      scaleY,
-      originalWidth,
-      originalHeight,
-    ).filter((det) => det.score >= minScore);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (err instanceof ExternalDetectionUnavailableError) {
-      const prefix = allowFallback
-        ? 'External detection unavailable, using fallback:'
-        : 'External detection unavailable:';
-      console.warn(prefix, message);
-    } else if (allowFallback) {
-      console.warn('External detection unavailable, using fallback:', message);
-    } else {
-      console.error('External detection error', message);
+  if (externalDetectionEnabled) {
+    try {
+      const hfDetections = await callExternalDetection(
+        imageBuffer,
+        DETECTION_PROMPTS,
+        DETECTION_CONFIG.topK,
+      );
+      detections = mapHfDetections(
+        hfDetections,
+        detectorWidth,
+        detectorHeight,
+        scaleX,
+        scaleY,
+        originalWidth,
+        originalHeight,
+      ).filter((det) => det.score >= minScore);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (err instanceof ExternalDetectionUnavailableError) {
+        const prefix = allowFallback
+          ? 'External detection unavailable, using fallback:'
+          : 'External detection unavailable:';
+        if (externalDetectionWarning !== message) {
+          console.warn(prefix, message);
+          externalDetectionWarning = message;
+        }
+        if (allowFallback) {
+          externalDetectionEnabled = false;
+        }
+      } else if (allowFallback) {
+        console.warn('External detection unavailable, using fallback:', message);
+      } else {
+        console.error('External detection error', message);
+      }
     }
   }
 
