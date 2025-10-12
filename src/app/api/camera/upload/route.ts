@@ -406,6 +406,8 @@ type HfDetection = {
   bounding_box?: { x_min: number; y_min: number; x_max: number; y_max: number };
 };
 
+type LocalizedObjectAnnotation = vision.protos.google.cloud.vision.v1.ILocalizedObjectAnnotation;
+
 async function callExternalDetection(
   imageBuffer: Buffer,
   prompts: readonly string[],
@@ -518,6 +520,111 @@ function mapHfDetections(
     .filter((region): region is DetectionRegion => Boolean(region));
 }
 
+function mapVisionDetections(
+  detections: LocalizedObjectAnnotation[],
+  detectorWidth: number,
+  detectorHeight: number,
+  scaleX: number,
+  scaleY: number,
+  originalWidth: number,
+  originalHeight: number,
+  minScore: number,
+) {
+  const sx = Number.isFinite(scaleX) && scaleX > 0 ? scaleX : originalWidth / detectorWidth;
+  const sy = Number.isFinite(scaleY) && scaleY > 0 ? scaleY : originalHeight / detectorHeight;
+
+  return detections
+    .map((det, index) => {
+      const vertices = det.boundingPoly?.normalizedVertices ?? [];
+      if (!vertices.length) {
+        return null;
+      }
+
+      const xs = vertices
+        .map((vertex) => clamp(Number(vertex?.x ?? 0), 0, 1))
+        .filter((value) => Number.isFinite(value));
+      const ys = vertices
+        .map((vertex) => clamp(Number(vertex?.y ?? 0), 0, 1))
+        .filter((value) => Number.isFinite(value));
+
+      if (!xs.length || !ys.length) {
+        return null;
+      }
+
+      const xmin = Math.min(...xs) * detectorWidth;
+      const xmax = Math.max(...xs) * detectorWidth;
+      const ymin = Math.min(...ys) * detectorHeight;
+      const ymax = Math.max(...ys) * detectorHeight;
+
+      if (xmax - xmin < 2 || ymax - ymin < 2) {
+        return null;
+      }
+
+      const rect = toRect({ xmin, ymin, xmax, ymax }, detectorWidth, detectorHeight);
+      const scaledRect: Rect = {
+        left: rect.left * sx,
+        top: rect.top * sy,
+        right: rect.right * sx,
+        bottom: rect.bottom * sy,
+      };
+
+      const score = Number(det.score ?? 0);
+      if (!Number.isFinite(score) || score < minScore) {
+        return null;
+      }
+
+      const label = det.name?.trim() || FALLBACK_LABEL;
+
+      return {
+        id: `vision-${index}`,
+        label,
+        score,
+        rect: scaledRect,
+        normalized: toNormalized(scaledRect, originalWidth, originalHeight),
+      } satisfies DetectionRegion;
+    })
+    .filter((region): region is DetectionRegion => Boolean(region));
+}
+
+async function detectWithVision(
+  imageBuffer: Buffer,
+  detectorWidth: number,
+  detectorHeight: number,
+  originalWidth: number,
+  originalHeight: number,
+  scaleX: number,
+  scaleY: number,
+  minScore: number,
+) {
+  if (!detectorWidth || !detectorHeight || !originalWidth || !originalHeight) {
+    return [];
+  }
+
+  try {
+    const [result] = await visionClient.objectLocalization({
+      image: { content: imageBuffer },
+    });
+    const annotations = result.localizedObjectAnnotations ?? [];
+    if (!annotations.length) {
+      return [];
+    }
+    const mapped = mapVisionDetections(
+      annotations,
+      detectorWidth,
+      detectorHeight,
+      scaleX,
+      scaleY,
+      originalWidth,
+      originalHeight,
+      Math.max(minScore * 0.75, 0.2),
+    );
+    return mapped;
+  } catch (err) {
+    console.error('Vision detection error', (err as Error).message);
+    return [];
+  }
+}
+
 async function detectRegions(
   imageBuffer: Buffer,
   detectorWidth: number,
@@ -547,6 +654,22 @@ async function detectRegions(
     ).filter((det) => det.score >= minScore);
   } catch (err) {
     console.error('External detection error', err);
+  }
+
+  if (detections.length < 2) {
+    const visionDetections = await detectWithVision(
+      imageBuffer,
+      detectorWidth,
+      detectorHeight,
+      originalWidth,
+      originalHeight,
+      scaleX,
+      scaleY,
+      minScore,
+    );
+    if (visionDetections.length) {
+      detections = [...detections, ...visionDetections];
+    }
   }
 
   const deduped = applyPerLabelNms(detections);
