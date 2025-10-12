@@ -653,7 +653,28 @@ async function detectRegions(
       originalHeight,
     ).filter((det) => det.score >= minScore);
   } catch (err) {
-    console.error('External detection error', err);
+    const message = err instanceof Error ? err.message : String(err);
+    if (allowFallback) {
+      console.warn('External detection unavailable, using fallback:', message);
+    } else {
+      console.error('External detection error', message);
+    }
+  }
+
+  if (detections.length < 2) {
+    const visionDetections = await detectWithVision(
+      imageBuffer,
+      detectorWidth,
+      detectorHeight,
+      originalWidth,
+      originalHeight,
+      scaleX,
+      scaleY,
+      minScore,
+    );
+    if (visionDetections.length) {
+      detections = [...detections, ...visionDetections];
+    }
   }
 
   if (detections.length < 2) {
