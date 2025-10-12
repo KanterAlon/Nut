@@ -89,7 +89,94 @@ class ExternalDetectionUnavailableError extends Error {
 const offBarcodeCache = new Map<string, OffProduct | null>();
 const offSearchCache = new Map<string, OffProduct[]>();
 
-const visionClient = new vision.ImageAnnotatorClient();
+type ImageAnnotatorClientOptions = ConstructorParameters<typeof vision.ImageAnnotatorClient>[0];
+
+function decodeBase64Json(value: string) {
+  try {
+    const decoded = Buffer.from(value, 'base64').toString('utf8');
+    return JSON.parse(decoded) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function parseJson(value: string) {
+  try {
+    return JSON.parse(value) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function sanitizePrivateKey(value: unknown) {
+  if (typeof value !== 'string') return undefined;
+  return value.replace(/\\n/g, '\n');
+}
+
+function buildVisionClientOptions(): ImageAnnotatorClientOptions | null {
+  const explicitClientEmail = process.env.GOOGLE_VISION_CLIENT_EMAIL;
+  const explicitPrivateKey = sanitizePrivateKey(process.env.GOOGLE_VISION_PRIVATE_KEY);
+  const explicitProjectId = process.env.GOOGLE_VISION_PROJECT_ID;
+
+  if (explicitClientEmail && explicitPrivateKey) {
+    return {
+      projectId: explicitProjectId,
+      credentials: {
+        client_email: explicitClientEmail,
+        private_key: explicitPrivateKey,
+      },
+    } satisfies ImageAnnotatorClientOptions;
+  }
+
+  const rawCredentials = process.env.GOOGLE_VISION_CREDENTIALS;
+  if (rawCredentials) {
+    const parsed = rawCredentials.trim().startsWith('{')
+      ? parseJson(rawCredentials)
+      : decodeBase64Json(rawCredentials);
+    if (parsed) {
+      const clientEmail = typeof parsed.client_email === 'string' ? parsed.client_email : undefined;
+      const privateKey = sanitizePrivateKey(parsed.private_key);
+      const projectId =
+        explicitProjectId ??
+        (typeof parsed.project_id === 'string' ? parsed.project_id : undefined);
+      if (clientEmail && privateKey) {
+        return {
+          projectId,
+          credentials: {
+            client_email: clientEmail,
+            private_key: privateKey,
+          },
+        } satisfies ImageAnnotatorClientOptions;
+      }
+    }
+  }
+
+  const credentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+  if (credentialsPath) {
+    return { keyFilename: credentialsPath } satisfies ImageAnnotatorClientOptions;
+  }
+
+  return null;
+}
+
+function createVisionClient() {
+  const options = buildVisionClientOptions();
+  if (!options) {
+    console.warn(
+      'Google Vision credentials are not configured. Set GOOGLE_VISION_CREDENTIALS or GOOGLE_VISION_CLIENT_EMAIL/GOOGLE_VISION_PRIVATE_KEY.',
+    );
+    return null;
+  }
+
+  try {
+    return new vision.ImageAnnotatorClient(options);
+  } catch (err) {
+    console.error('Failed to initialize Vision client', (err as Error).message);
+    return null;
+  }
+}
+
+const visionClient = createVisionClient();
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
@@ -623,7 +710,13 @@ async function detectWithVision(
   }
 
   try {
-    const objectLocalization = visionClient.objectLocalization?.bind(visionClient);
+    const client = visionClient;
+    if (!client) {
+      console.warn('Vision client unavailable for detection');
+      return [];
+    }
+
+    const objectLocalization = client.objectLocalization?.bind(client);
     if (!objectLocalization) {
       console.warn('Vision client missing objectLocalization method');
       return [];
@@ -1082,9 +1175,15 @@ function buildTitle(product: OffProduct | null, lines: string[]) {
 
 async function recogniseText(buffer: Buffer, languageHints: string[]) {
   try {
+    const client = visionClient;
+    if (!client) {
+      console.warn('Vision client unavailable for OCR');
+      return '';
+    }
+
     const prepared = await preprocessForOcr(buffer);
     const hints = toLanguageHints(languageHints);
-    const [result] = await visionClient.documentTextDetection({
+    const [result] = await client.documentTextDetection({
       image: { content: prepared },
       imageContext: hints.length ? { languageHints: hints } : undefined,
     });
@@ -1108,6 +1207,21 @@ export async function POST(req: NextRequest) {
   const imageFile = formData.get('image');
   if (!imageFile || !(imageFile instanceof File)) {
     return new Response(JSON.stringify({ error: 'No file uploaded' }), { status: 400 });
+  }
+
+  if (!visionClient) {
+    return new Response(
+      JSON.stringify({
+        error:
+          'Camera scanning is not configured. Provide Google Vision credentials via GOOGLE_VISION_CREDENTIALS or GOOGLE_VISION_CLIENT_EMAIL/GOOGLE_VISION_PRIVATE_KEY.',
+      }),
+      {
+        status: 500,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      },
+    );
   }
 
   const incomingLang = formData.get('lang') ?? process.env.OCR_LANGS ?? 'spa+eng';
