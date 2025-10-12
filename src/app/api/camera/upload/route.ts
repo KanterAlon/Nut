@@ -79,6 +79,13 @@ const HF_DETECTION_URL =
   process.env.HF_DETECTION_URL ?? 'https://api-inference.huggingface.co/models/google/owlvit-base-patch32';
 const HF_API_TOKEN = process.env.HF_API_TOKEN ?? process.env.HUGGINGFACEHUB_API_TOKEN ?? '';
 
+class ExternalDetectionUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ExternalDetectionUnavailableError';
+  }
+}
+
 const offBarcodeCache = new Map<string, OffProduct | null>();
 const offSearchCache = new Map<string, OffProduct[]>();
 
@@ -414,6 +421,14 @@ async function callExternalDetection(
   topK: number,
   attempt = 0,
 ): Promise<HfDetection[]> {
+  if (!HF_DETECTION_URL) {
+    throw new ExternalDetectionUnavailableError('HF detection URL not configured');
+  }
+
+  if (!HF_API_TOKEN && HF_DETECTION_URL.includes('huggingface.co')) {
+    throw new ExternalDetectionUnavailableError('HF API token not configured');
+  }
+
   const body = JSON.stringify({
     inputs: imageBuffer.toString('base64'),
     parameters: {
@@ -449,6 +464,13 @@ async function callExternalDetection(
       await new Promise((resolve) => setTimeout(resolve, 2000));
     }
     return callExternalDetection(imageBuffer, prompts, topK, attempt + 1);
+  }
+
+  if ([401, 403, 404].includes(response.status)) {
+    const message = await response.text();
+    throw new ExternalDetectionUnavailableError(
+      `HF detection unavailable (${response.status}): ${message || 'No response body'}`,
+    );
   }
 
   if (!response.ok) {
@@ -660,26 +682,15 @@ async function detectRegions(
     ).filter((det) => det.score >= minScore);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    if (allowFallback) {
+    if (err instanceof ExternalDetectionUnavailableError) {
+      const prefix = allowFallback
+        ? 'External detection unavailable, using fallback:'
+        : 'External detection unavailable:';
+      console.warn(prefix, message);
+    } else if (allowFallback) {
       console.warn('External detection unavailable, using fallback:', message);
     } else {
       console.error('External detection error', message);
-    }
-  }
-
-  if (detections.length < 2) {
-    const visionDetections = await detectWithVision(
-      imageBuffer,
-      detectorWidth,
-      detectorHeight,
-      originalWidth,
-      originalHeight,
-      scaleX,
-      scaleY,
-      minScore,
-    );
-    if (visionDetections.length) {
-      detections = [...detections, ...visionDetections];
     }
   }
 
