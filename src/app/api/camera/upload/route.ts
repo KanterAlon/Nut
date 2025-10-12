@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest } from 'next/server';
 import sharp, { type Sharp } from 'sharp';
-import vision from '@google-cloud/vision';
+import vision, { protos as visionProtos } from '@google-cloud/vision';
 
 export const runtime = 'nodejs';
 
@@ -406,7 +406,7 @@ type HfDetection = {
   bounding_box?: { x_min: number; y_min: number; x_max: number; y_max: number };
 };
 
-type LocalizedObjectAnnotation = vision.protos.google.cloud.vision.v1.ILocalizedObjectAnnotation;
+type LocalizedObjectAnnotation = visionProtos.google.cloud.vision.v1.ILocalizedObjectAnnotation;
 
 async function callExternalDetection(
   imageBuffer: Buffer,
@@ -601,7 +601,13 @@ async function detectWithVision(
   }
 
   try {
-    const [result] = await visionClient.objectLocalization({
+    const objectLocalization = visionClient.objectLocalization?.bind(visionClient);
+    if (!objectLocalization) {
+      console.warn('Vision client missing objectLocalization method');
+      return [];
+    }
+
+    const [result] = await objectLocalization({
       image: { content: imageBuffer },
     });
     const annotations = result.localizedObjectAnnotations ?? [];
