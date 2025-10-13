@@ -59,6 +59,8 @@
   height: 60px;
   padding-inline: 1.5rem;
   position: relative;
+  background-color: var(--whiteback-color);
+  color-scheme: light;
 }
 
 .search-input {
@@ -68,6 +70,10 @@
   padding: 10px;
   border-radius: 15px;
   width: 100%;
+  background-color: transparent;
+  color: var(--secondary2-color);
+  caret-color: var(--secondary2-color);
+  color-scheme: light;
 }
 
 .search-button {

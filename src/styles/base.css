@@ -18,6 +18,23 @@ body {
   font-family: var(--font-family-body);
 }
 
+input,
+textarea,
+select {
+  font-family: var(--font-family-body);
+  color: var(--secondary2-color);
+  background-color: var(--whiteback-color);
+  color-scheme: light;
+  caret-color: var(--secondary2-color);
+}
+
+input::placeholder,
+textarea::placeholder,
+select::placeholder {
+  color: var(--placeholder-text-color);
+  opacity: 1;
+}
+
 h1, h2, h3, h4, p, button, a, label {
   margin: 0;
   padding: 0;

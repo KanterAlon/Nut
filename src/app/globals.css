@@ -1,21 +1,18 @@
 @import "../index.css";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --background: var(--secondary3-color);
+  --foreground: var(--secondary2-color);
 }
 
 html,
 body {
   max-width: 100vw;
   overflow-x: hidden;
+}
+
+html {
+  color-scheme: light;
 }
 
 body {
@@ -35,10 +32,4 @@ body {
 a {
   color: inherit;
   text-decoration: none;
-}
-
-@media (prefers-color-scheme: dark) {
-  html {
-    color-scheme: dark;
-  }
 }
