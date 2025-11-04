@@ -20,7 +20,9 @@ export default function SearchResults() {
   const [loading, setLoading] = useState(true);
   const [products, setProducts] = useState<Product[]>([]);
   const [selectionMode, setSelectionMode] = useState(false);
-  const [selected, setSelected] = useState<string[]>([]);
+  const [selected, setSelected] = useState<
+    Array<{ id: string; code: string | null; name: string }>
+  >([]);
   const [warning, setWarning] = useState('');
   const [alertMessage, setAlertMessage] = useState('');
   const [searchValue, setSearchValue] = useState(query);
@@ -80,10 +82,24 @@ export default function SearchResults() {
     }
   }, [replacementActive]);
 
-  const handleClick = (product: Product) => {
+  const normalizeCode = (code: string | null | undefined) => {
+    if (!code) return null;
+    const trimmed = code.trim();
+    if (!trimmed || trimmed.toLowerCase() === 'undefined') return null;
+    return trimmed;
+  };
+
+  const buildProductId = (product: Product, index: number) => {
+    const normalized = normalizeCode(product.code);
+    if (normalized) return normalized;
+    const slug = product.name.replace(/\s+/g, '-').toLowerCase();
+    return `search-${index}-${slug}`;
+  };
+
+  const handleClick = (product: Product, productId: string) => {
     if (replacementActive && replacementTarget) {
       const success = completeReplacement({
-        code: product.code || null,
+        code: normalizeCode(product.code),
         name: product.name,
         image: product.image || null,
       });
@@ -95,16 +111,23 @@ export default function SearchResults() {
     }
     if (selectionMode) {
       setSelected((prev) => {
-        if (prev.includes(product.code)) return prev.filter((c) => c !== product.code);
+        if (prev.some((item) => item.id === productId)) {
+          return prev.filter((item) => item.id !== productId);
+        }
         if (prev.length >= 10) {
           setWarning('Solo puedes comparar hasta 10 productos');
           setTimeout(() => setWarning(''), 2000);
           return prev;
         }
-        return [...prev, product.code];
+        return [...prev, { id: productId, code: normalizeCode(product.code), name: product.name }];
       });
     } else {
-      router.push(`/producto?code=${encodeURIComponent(product.code)}`);
+      const normalized = normalizeCode(product.code);
+      if (normalized) {
+        router.push(`/producto?code=${encodeURIComponent(normalized)}`);
+      } else {
+        router.push(`/search?query=${encodeURIComponent(product.name)}`);
+      }
     }
   };
 
@@ -116,8 +139,13 @@ export default function SearchResults() {
 
   const handleCompare = () => {
     if (selected.length < 2) return;
-    const codes = selected.map((c) => encodeURIComponent(c)).join(',');
-    router.push(`/compare?codes=${codes}`);
+    const values = selected
+      .map((item) => item.code ?? item.name)
+      .map((value) => value.trim())
+      .filter(Boolean);
+    if (values.length < 2) return;
+    const query = values.map((value) => encodeURIComponent(value)).join(',');
+    router.push(`/compare?codes=${query}`);
   };
 
   const handleSearchSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -197,13 +225,14 @@ export default function SearchResults() {
       ) : (
         <div className="cards-container">
           {products.map((p, index) => {
-            const isSelected = selected.includes(p.code);
-            const key = p.code ? `${p.code}-${index}` : index;
+            const productId = buildProductId(p, index);
+            const isSelected = selected.some((item) => item.id === productId);
+            const key = `${productId}-${index}`;
             return (
               <div
                 key={key}
                 className={`product-card${isSelected ? ' selected' : ''}`}
-                onClick={() => handleClick(p)}
+                onClick={() => handleClick(p, productId)}
               >
                 <LazyImage src={p.image} alt={p.name} className="card-image" />
                 <h3 className="card-title">{p.name}</h3>

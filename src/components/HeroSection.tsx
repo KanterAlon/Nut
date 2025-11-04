@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { FiSearch, FiCamera } from 'react-icons/fi';
 import {
@@ -90,6 +90,24 @@ export default function HeroSection() {
   const router = useRouter();
   const { showResults } = useCameraResults();
   const isMobile = typeof window !== 'undefined' && /Mobi|Android/i.test(navigator.userAgent);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+
+    const handleOpenCamera = () => {
+      if (isMobile && fileInputRef.current) {
+        fileInputRef.current.click();
+      } else {
+        setShowCamera(true);
+      }
+    };
+
+    window.addEventListener('nut:open-camera', handleOpenCamera);
+
+    return () => {
+      window.removeEventListener('nut:open-camera', handleOpenCamera);
+    };
+  }, [isMobile]);
 
   const handleSearch = () => {
     if (query.trim()) {
