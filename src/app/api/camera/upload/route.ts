@@ -840,11 +840,29 @@ async function detectRegions(
   ];
 }
 
-function cleanLines(text: string) {
+type OcrParagraphEntry = {
+  text: string;
+  area: number;
+  height: number;
+  width: number;
+};
+
+function cleanLines(text: string, priority: OcrParagraphEntry[] = []) {
   const seen = new Set<string>();
   const lines: string[] = [];
 
-  for (const rawLine of text.split(/\r?\n/)) {
+  const prioritized = priority
+    .map((entry) => ({
+      text: entry.text.replace(/\s+/g, ' ').trim(),
+      score: entry.area > 0 ? entry.area : entry.height * entry.width,
+    }))
+    .filter((entry) => entry.text.length)
+    .sort((a, b) => b.score - a.score)
+    .map((entry) => entry.text);
+
+  const queue = [...prioritized, ...text.split(/\r?\n/)] as string[];
+
+  for (const rawLine of queue) {
     const sanitized = rawLine.replace(/[^\w\s./-]/g, ' ').replace(/\s+/g, ' ').trim();
     if (!sanitized) continue;
     const alnum = sanitized.replace(/[^a-z0-9]/gi, '');
@@ -1188,12 +1206,84 @@ function buildTitle(product: OffProduct | null, lines: string[]) {
   return 'Producto detectado';
 }
 
-async function recogniseText(buffer: Buffer, languageHints: string[]) {
+type VisionParagraph = visionProtos.google.cloud.vision.v1.IParagraph;
+type VisionBoundingPoly = visionProtos.google.cloud.vision.v1.IBoundingPoly;
+
+function computeBoundingMetrics(box?: VisionBoundingPoly | null) {
+  const vertices = box?.vertices ?? [];
+  if (!vertices.length) {
+    return { width: 0, height: 0, area: 0 };
+  }
+  const xs = vertices.map((vertex) => (typeof vertex?.x === 'number' ? vertex.x : 0));
+  const ys = vertices.map((vertex) => (typeof vertex?.y === 'number' ? vertex.y : 0));
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const width = Math.max(0, maxX - minX);
+  const height = Math.max(0, maxY - minY);
+  const area = width * height;
+  return { width, height, area };
+}
+
+function extractParagraphText(paragraph?: VisionParagraph | null) {
+  if (!paragraph) return '';
+  const words = paragraph.words ?? [];
+  if (!words.length) return '';
+  const parts: string[] = [];
+
+  for (const word of words) {
+    const symbols = word.symbols ?? [];
+    if (!symbols.length) continue;
+    const text = symbols.map((symbol) => symbol.text ?? '').join('');
+    if (!text) continue;
+    parts.push(text);
+
+    const lastSymbol = symbols[symbols.length - 1];
+    const breakType = lastSymbol?.property?.detectedBreak?.type;
+    if (breakType === 'SPACE' || breakType === 'SURE_SPACE') {
+      parts.push(' ');
+    } else if (breakType === 'EOL_SURE_SPACE' || breakType === 'LINE_BREAK') {
+      parts.push('\n');
+    } else {
+      parts.push(' ');
+    }
+  }
+
+  return parts.join('').replace(/\s+/g, ' ').trim();
+}
+
+function collectParagraphEntries(annotation: visionProtos.google.cloud.vision.v1.ITextAnnotation | null | undefined) {
+  const entries: OcrParagraphEntry[] = [];
+  if (!annotation?.pages) return entries;
+
+  annotation.pages.forEach((page) => {
+    page?.blocks?.forEach((block) => {
+      block?.paragraphs?.forEach((paragraph) => {
+        const text = extractParagraphText(paragraph);
+        if (!text) return;
+        const metrics = computeBoundingMetrics(paragraph?.boundingBox);
+        entries.push({
+          text,
+          area: metrics.area,
+          height: metrics.height,
+          width: metrics.width,
+        });
+      });
+    });
+  });
+
+  return entries;
+}
+
+type OcrResult = { text: string; paragraphs: OcrParagraphEntry[] };
+
+async function recogniseText(buffer: Buffer, languageHints: string[]): Promise<OcrResult> {
   try {
     const client = visionClient;
     if (!client) {
       console.warn('Vision client unavailable for OCR');
-      return '';
+      return { text: '', paragraphs: [] };
     }
 
     const prepared = await preprocessForOcr(buffer);
@@ -1206,10 +1296,11 @@ async function recogniseText(buffer: Buffer, languageHints: string[]) {
       result.fullTextAnnotation?.text ??
       (result.textAnnotations && result.textAnnotations.length > 0 ? result.textAnnotations[0]?.description : '') ??
       '';
-    return text;
+    const paragraphs = collectParagraphEntries(result.fullTextAnnotation);
+    return { text, paragraphs };
   } catch (err) {
     console.error('Google Vision OCR error', (err as Error).message);
-    return '';
+    return { text: '', paragraphs: [] };
   }
 }
 
@@ -1384,8 +1475,8 @@ export async function POST(req: NextRequest) {
               })
               .toBuffer();
 
-            const rawText = await recogniseText(cropBuffer, languageHints);
-            const lines = cleanLines(rawText);
+            const ocrResult = await recogniseText(cropBuffer, languageHints);
+            const lines = cleanLines(ocrResult.text, ocrResult.paragraphs);
             const quality = evaluateOcrQuality(lines);
             const barcode = extractBarcode(lines);
             const parsedInfo = parseOcrInfo(lines);
@@ -1400,7 +1491,7 @@ export async function POST(req: NextRequest) {
                     type: 'product',
                     index,
                     status: 'low-ocr',
-                    aiResponse: lines.join('\n') || undefined,
+                    aiResponse: ocrResult.text || undefined,
                     message: quality.message,
                     barcode: barcode ?? null,
                     brandCandidate: parsedInfo.brand,
@@ -1436,7 +1527,7 @@ export async function POST(req: NextRequest) {
                   index,
                   status: offResult.product ? 'ready' : 'no-match',
                   title,
-                  aiResponse: lines.join('\n') || undefined,
+                  aiResponse: ocrResult.text || undefined,
                   offImage: offResult.product?.image_url || offResult.product?.image_front_url || null,
                   offLink: offResult.product?.url || null,
                   code: offResult.product?.code || barcode || null,

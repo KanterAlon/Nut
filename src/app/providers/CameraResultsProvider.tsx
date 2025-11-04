@@ -95,6 +95,14 @@ export type AddToComparisonResult = {
   message?: string;
 };
 
+function sanitizeCode(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (trimmed.toLowerCase() === 'undefined') return null;
+  return trimmed;
+}
+
 function resolveProductQuery(product: CameraDetectedProduct): string | null {
   const querySources = [
     product.manualOverride?.name,
@@ -111,7 +119,8 @@ function resolveProductQuery(product: CameraDetectedProduct): string | null {
 
 function buildComparisonItem(product: CameraDetectedProduct): ComparisonItem | null {
   const manual = product.manualOverride;
-  const code = manual?.code?.trim() || product.code?.trim() || product.barcode?.trim();
+  const code =
+    sanitizeCode(manual?.code) || sanitizeCode(product.code) || sanitizeCode(product.barcode);
 
   const labelSources = [
     manual?.name,
@@ -159,6 +168,9 @@ interface CameraResultsContextValue {
   isInComparison: (product: CameraDetectedProduct) => boolean;
   comparisonItems: ComparisonItem[];
   getComparisonUrl: () => string | null;
+  removeFromComparison: (product: CameraDetectedProduct) => boolean;
+  clearComparison: () => void;
+  resetResults: () => void;
   beginReplacement: (index: number) => string | null;
   completeReplacement: (selection: ManualProductSelection) => boolean;
   cancelReplacement: () => void;
@@ -295,6 +307,30 @@ export function CameraResultsProvider({ children }: { children: ReactNode }) {
     return `/compare?names=${names}`;
   }, []);
 
+  const removeFromComparison = useCallback((product: CameraDetectedProduct) => {
+    const item = buildComparisonItem(product);
+    if (!item) return false;
+    const previous = comparisonItemsRef.current;
+    if (!previous.some((existing) => existing.type === item.type && existing.value === item.value)) {
+      return false;
+    }
+    setComparisonItems(
+      previous.filter(
+        (existing) => !(existing.type === item.type && existing.value === item.value),
+      ),
+    );
+    return true;
+  }, []);
+
+  const clearComparison = useCallback(() => {
+    setComparisonItems([]);
+  }, []);
+
+  const resetResults = useCallback(() => {
+    setResults([]);
+    setMeta(null);
+  }, []);
+
   const beginReplacement = useCallback(
     (index: number) => {
       const currentResults = resultsRef.current;
@@ -386,6 +422,9 @@ export function CameraResultsProvider({ children }: { children: ReactNode }) {
       isInComparison,
       comparisonItems,
       getComparisonUrl,
+      removeFromComparison,
+      clearComparison,
+      resetResults,
       beginReplacement,
       completeReplacement,
       cancelReplacement,
@@ -402,6 +441,9 @@ export function CameraResultsProvider({ children }: { children: ReactNode }) {
       isInComparison,
       comparisonItems,
       getComparisonUrl,
+      removeFromComparison,
+      clearComparison,
+      resetResults,
       beginReplacement,
       completeReplacement,
       cancelReplacement,
@@ -436,6 +478,9 @@ function CameraResultsOverlay() {
     isInComparison,
     comparisonItems,
     getComparisonUrl,
+    removeFromComparison,
+    clearComparison,
+    resetResults,
     beginReplacement,
   } = useCameraResults();
   const router = useRouter();
@@ -500,13 +545,13 @@ function CameraResultsOverlay() {
   };
 
   const handleDetails = (product: CameraDetectedProduct) => {
-    const manualCode = product.manualOverride?.code?.trim();
+    const manualCode = sanitizeCode(product.manualOverride?.code);
     if (manualCode) {
       prepareForNavigation();
       router.push(`/producto?code=${encodeURIComponent(manualCode)}`);
       return;
     }
-    const trimmedCode = product.code?.trim();
+    const trimmedCode = sanitizeCode(product.code);
     if (trimmedCode) {
       prepareForNavigation();
       router.push(`/producto?code=${encodeURIComponent(trimmedCode)}`);
@@ -573,6 +618,35 @@ function CameraResultsOverlay() {
     }
   };
 
+  const handleRemoveFromComparison = (product: CameraDetectedProduct) => {
+    const removed = removeFromComparison(product);
+    if (removed) {
+      setFeedback({ message: 'Producto eliminado de la comparación.', tone: 'success' });
+    }
+  };
+
+  const handleClearComparison = () => {
+    if (!comparisonItems.length) return;
+    clearComparison();
+    resetResults();
+    setFeedback({ message: 'Comparación reiniciada.', tone: 'success' });
+  };
+
+  const dispatchGlobalEvent = (name: string) => {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent(name));
+  };
+
+  const handleRequestScan = () => {
+    dismissResults();
+    dispatchGlobalEvent('nut:open-camera');
+  };
+
+  const handleRequestSearch = () => {
+    prepareForNavigation();
+    router.push('/search?replacement=1');
+  };
+
   const handleOpenComparison = () => {
     const url = getComparisonUrl();
     if (!url) {
@@ -604,6 +678,7 @@ function CameraResultsOverlay() {
 
   const comparisonCount = comparisonItems.length;
   const comparisonReady = Boolean(getComparisonUrl());
+  const hasResults = results.length > 0;
 
   return (
     <div className="camera-results-overlay" role="dialog" aria-modal="true" onClick={handleClose}>
@@ -617,14 +692,23 @@ function CameraResultsOverlay() {
               )}
               {meta?.status === 'processing' && <span>Analizando detecciones…</span>}
               {comparisonCount > 0 && (
-                <button
-                  type="button"
-                  className="camera-results-compare"
-                  onClick={handleOpenComparison}
-                  disabled={!comparisonReady}
-                >
-                  Ver comparación ({comparisonCount})
-                </button>
+                <div className="camera-results-actions-bar">
+                  <button
+                    type="button"
+                    className="camera-results-compare"
+                    onClick={handleOpenComparison}
+                    disabled={!comparisonReady}
+                  >
+                    Ver comparación ({comparisonCount})
+                  </button>
+                  <button
+                    type="button"
+                    className="camera-results-clear"
+                    onClick={handleClearComparison}
+                  >
+                    Borrar comparación
+                  </button>
+                </div>
               )}
             </div>
           </div>
@@ -643,7 +727,7 @@ function CameraResultsOverlay() {
         )}
 
         <div className="camera-results-body">
-          {meta?.imageDataUrl && (
+          {meta?.imageDataUrl && hasResults && (
             <div
               className="camera-results-preview"
               aria-label="Vista previa de la captura"
@@ -668,110 +752,180 @@ function CameraResultsOverlay() {
           )}
 
           <div className="camera-results-list">
-            {meta?.status === 'no-products' || results.length === 0 ? (
+            {meta?.status === 'no-products' ? (
               <div className="camera-results-empty">
                 <p>{meta?.statusMessage || 'No encontramos productos en la captura.'}</p>
               </div>
-            ) : (
-              results.map((product, listIndex) => {
-                const status = product.status ?? 'ready';
-                const statusLabel = formatStatusLabel(status);
-                const displayTitle =
-                  product.manualOverride?.name ||
-                  product.title ||
-                  product.aiResponse ||
-                  `Producto ${product.index + 1}`;
-                const additionalInfo = [
-                  product.manualOverride?.brand,
-                  product.brandCandidate,
-                  product.productCandidate &&
-                    product.productCandidate !== product.manualOverride?.name
-                    ? product.productCandidate
-                    : null,
-                ]
-                  .filter(Boolean)
-                  .join(' • ');
-                const hasDetails = Boolean(
-                  product.manualOverride?.code ||
-                    product.code ||
-                    product.searchQuery ||
-                    (product.searchCandidates && product.searchCandidates.length > 0) ||
-                    resolveProductQuery(product),
-                );
-                const showExplore = Boolean(
-                  product.manualOverride?.name ||
-                    product.searchQuery ||
-                    (product.searchCandidates && product.searchCandidates.length > 0) ||
-                    product.brandCandidate ||
-                    product.productCandidate,
-                );
-                const alreadyCompared = isInComparison(product);
+            ) : hasResults ? (
+              <>
+                {results.map((product, listIndex) => {
+                  const status = product.status ?? 'ready';
+                  const statusLabel = formatStatusLabel(status);
+                  const displayTitle =
+                    product.manualOverride?.name ||
+                    product.title ||
+                    product.aiResponse ||
+                    `Producto ${product.index + 1}`;
+                  const additionalInfo = [
+                    product.manualOverride?.brand,
+                    product.brandCandidate,
+                    product.productCandidate &&
+                      product.productCandidate !== product.manualOverride?.name
+                      ? product.productCandidate
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' • ');
+                  const hasDetails = Boolean(
+                    product.manualOverride?.code ||
+                      product.code ||
+                      product.searchQuery ||
+                      (product.searchCandidates && product.searchCandidates.length > 0) ||
+                      resolveProductQuery(product),
+                  );
+                  const showExplore = Boolean(
+                    product.manualOverride?.name ||
+                      product.searchQuery ||
+                      (product.searchCandidates && product.searchCandidates.length > 0) ||
+                      product.brandCandidate ||
+                      product.productCandidate,
+                  );
+                  const alreadyCompared = isInComparison(product);
+                  const comparisonKey = `${product.index}-${product.boxId ?? sanitizeCode(product.code) ?? 'no-code'}`;
 
-                return (
-                  <article
-                    key={`${product.index}-${product.boxId ?? product.code ?? 'no-code'}`}
-                    className={`camera-result-card status-${status}`}
-                  >
-                    <div className="camera-result-header">
-                      {statusLabel && <span className="camera-result-status">{statusLabel}</span>}
-                      {product.barcode && <span className="camera-result-code">#{product.barcode}</span>}
-                    </div>
-                    <div className="camera-result-main">
-                      <div className="camera-result-thumbnail">
-                        {product.manualOverride?.image || product.offImage ? (
-                          <img
-                            src={product.manualOverride?.image ?? product.offImage ?? undefined}
-                            alt={displayTitle}
-                          />
-                        ) : (
-                          <div className="camera-result-placeholder">Sin imagen</div>
-                        )}
+                  return (
+                    <article
+                      key={comparisonKey}
+                      className={`camera-result-card status-${status}`}
+                    >
+                      <div className="camera-result-header">
+                        {statusLabel && <span className="camera-result-status">{statusLabel}</span>}
+                        <div className="camera-result-header-actions">
+                          {product.barcode && (
+                            <span className="camera-result-code">#{product.barcode}</span>
+                          )}
+                          {alreadyCompared && (
+                            <button
+                              type="button"
+                              className="camera-result-remove"
+                              onClick={() => handleRemoveFromComparison(product)}
+                            >
+                              Quitar de la comparación
+                            </button>
+                          )}
+                        </div>
                       </div>
-                      <div className="camera-result-info">
-                        <h3>{displayTitle}</h3>
-                        {additionalInfo && (
-                          <p className="camera-result-text">{additionalInfo}</p>
-                        )}
-                        {product.message && <p className="camera-result-text">{product.message}</p>}
+                      <div className="camera-result-main">
+                        <div className="camera-result-thumbnail">
+                          {product.manualOverride?.image || product.offImage ? (
+                            <img
+                              src={product.manualOverride?.image ?? product.offImage ?? undefined}
+                              alt={displayTitle}
+                            />
+                          ) : (
+                            <div className="camera-result-placeholder">Sin imagen</div>
+                          )}
+                        </div>
+                        <div className="camera-result-info">
+                          <h3>{displayTitle}</h3>
+                          {additionalInfo && (
+                            <p className="camera-result-text">{additionalInfo}</p>
+                          )}
+                          {product.message && <p className="camera-result-text">{product.message}</p>}
+                        </div>
                       </div>
-                    </div>
-                    <div className="camera-result-actions">
-                      <button
-                        type="button"
-                        className="camera-result-button"
-                        disabled={!hasDetails}
-                        onClick={() => handleDetails(product)}
-                      >
-                        Ver detalles
-                      </button>
-                      {showExplore && (
+                      <div className="camera-result-actions">
+                        <button
+                          type="button"
+                          className="camera-result-button"
+                          disabled={!hasDetails}
+                          onClick={() => handleDetails(product)}
+                        >
+                          Ver detalles
+                        </button>
+                        {showExplore && (
+                          <button
+                            type="button"
+                            className="camera-result-secondary"
+                            onClick={() => handleExplore(product)}
+                          >
+                            Ver más resultados
+                          </button>
+                        )}
+                        {!alreadyCompared && (
+                          <button
+                            type="button"
+                            className="camera-result-secondary"
+                            onClick={() => handleAddToComparison(product)}
+                          >
+                            Agregar a comparación
+                          </button>
+                        )}
                         <button
                           type="button"
                           className="camera-result-secondary"
-                          onClick={() => handleExplore(product)}
+                          onClick={() => handleReplace(listIndex, product)}
                         >
-                          Ver más resultados
+                          Reemplazar producto
                         </button>
-                      )}
-                      <button
-                        type="button"
-                        className="camera-result-secondary"
-                        onClick={() => handleAddToComparison(product)}
-                        disabled={alreadyCompared}
-                      >
-                        {alreadyCompared ? 'En comparación' : 'Agregar a comparación'}
-                      </button>
-                      <button
-                        type="button"
-                        className="camera-result-secondary"
-                        onClick={() => handleReplace(listIndex, product)}
-                      >
-                        Reemplazar producto
-                      </button>
+                      </div>
+                    </article>
+                  );
+                })}
+
+                <article className="camera-result-card camera-result-card--add" key="camera-add-scan">
+                  <div className="camera-result-main">
+                    <div className="camera-result-placeholder">Agrega más productos</div>
+                    <div className="camera-result-info">
+                      <h3>Agregar producto escaneando</h3>
+                      <p className="camera-result-text">
+                        Inicia un nuevo escaneo para sumar otro producto a la comparación.
+                      </p>
                     </div>
-                  </article>
-                );
-              })
+                  </div>
+                  <div className="camera-result-actions">
+                    <button
+                      type="button"
+                      className="camera-result-button"
+                      onClick={handleRequestScan}
+                    >
+                      + Agregar producto escaneando
+                    </button>
+                  </div>
+                </article>
+
+                <article className="camera-result-card camera-result-card--add" key="camera-add-search">
+                  <div className="camera-result-main">
+                    <div className="camera-result-placeholder">Buscar manualmente</div>
+                    <div className="camera-result-info">
+                      <h3>Agregar producto con buscador</h3>
+                      <p className="camera-result-text">
+                        Usa el buscador para encontrar productos y añadirlos a la comparación.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="camera-result-actions">
+                    <button
+                      type="button"
+                      className="camera-result-secondary"
+                      onClick={handleRequestSearch}
+                    >
+                      + Agregar producto con buscador
+                    </button>
+                  </div>
+                </article>
+              </>
+            ) : (
+              <div className="camera-results-empty camera-results-empty--actionable">
+                <p>La comparación está vacía.</p>
+                <button
+                  type="button"
+                  className="camera-result-button camera-results-empty-button"
+                  onClick={handleRequestScan}
+                >
+                  Nuevo escaneo
+                </button>
+              </div>
             )}
           </div>
         </div>
