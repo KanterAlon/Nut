@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { FiSearch, FiCamera } from 'react-icons/fi';
 import {
@@ -89,25 +89,34 @@ export default function HeroSection() {
   const metaRef = useRef<CameraResultsMeta | null>(null);
   const router = useRouter();
   const { showResults } = useCameraResults();
-  const isMobile = typeof window !== 'undefined' && /Mobi|Android/i.test(navigator.userAgent);
+
+  const triggerCamera = useCallback(() => {
+    const supportsInlineCamera =
+      typeof navigator !== 'undefined' &&
+      Boolean(navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function');
+
+    if (supportsInlineCamera) {
+      setShowCamera(true);
+      return;
+    }
+
+    if (fileInputRef.current) {
+      fileInputRef.current.click();
+      return;
+    }
+
+    alert('Tu navegador no permite abrir la cámara. Intenta subir una foto manualmente.');
+  }, [fileInputRef]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
 
-    const handleOpenCamera = () => {
-      if (isMobile && fileInputRef.current) {
-        fileInputRef.current.click();
-      } else {
-        setShowCamera(true);
-      }
-    };
-
-    window.addEventListener('nut:open-camera', handleOpenCamera);
+    window.addEventListener('nut:open-camera', triggerCamera);
 
     return () => {
-      window.removeEventListener('nut:open-camera', handleOpenCamera);
+      window.removeEventListener('nut:open-camera', triggerCamera);
     };
-  }, [isMobile]);
+  }, [triggerCamera]);
 
   const handleSearch = () => {
     if (query.trim()) {
@@ -116,11 +125,7 @@ export default function HeroSection() {
   };
 
   const handleCameraClick = () => {
-    if (isMobile && fileInputRef.current) {
-      fileInputRef.current.click();
-    } else {
-      setShowCamera(true);
-    }
+    triggerCamera();
   };
 
   async function consumeStream(reader: ReadableStreamDefaultReader<Uint8Array>) {
