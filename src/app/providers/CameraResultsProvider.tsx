@@ -279,7 +279,9 @@ export function CameraResultsProvider({ children }: { children: ReactNode }) {
         return { success: false, message: 'Solo puedes comparar hasta 10 productos.' };
       }
 
-      setComparisonItems([...current, item]);
+      const next = [...current, item];
+      comparisonItemsRef.current = next;
+      setComparisonItems(next);
       return { success: true, message: 'Producto agregado a la comparación.' };
     },
     [],
@@ -314,15 +316,16 @@ export function CameraResultsProvider({ children }: { children: ReactNode }) {
     if (!previous.some((existing) => existing.type === item.type && existing.value === item.value)) {
       return false;
     }
-    setComparisonItems(
-      previous.filter(
-        (existing) => !(existing.type === item.type && existing.value === item.value),
-      ),
+    const next = previous.filter(
+      (existing) => !(existing.type === item.type && existing.value === item.value),
     );
+    comparisonItemsRef.current = next;
+    setComparisonItems(next);
     return true;
   }, []);
 
   const clearComparison = useCallback(() => {
+    comparisonItemsRef.current = [];
     setComparisonItems([]);
   }, []);
 
