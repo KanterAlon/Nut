@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useDevMode } from '@/app/providers/DevModeProvider';
 import { useCameraResults } from '@/app/providers/CameraResultsProvider';
@@ -8,7 +8,7 @@ import LazyImage from './LazyImage';
 import AlertPopup from './AlertPopup';
 
 interface Product {
-  code: string;
+  code: string | null;
   name: string;
   image: string;
 }
@@ -31,6 +31,192 @@ export default function SearchResults() {
   const { replacementTarget, completeReplacement, cancelReplacement } = useCameraResults();
 
   const replacementActive = useMemo(() => Boolean(replacementTarget), [replacementTarget]);
+  const apiBase = useMemo(() => process.env.NEXT_PUBLIC_API_URL || '', []);
+
+  const normalizeCode = useCallback((code: string | null | undefined) => {
+    if (!code) return null;
+    const trimmed = code.trim();
+    if (!trimmed) return null;
+    const lowered = trimmed.toLowerCase();
+    if (lowered === 'undefined' || lowered === 'null') return null;
+    const digitsOnly = trimmed.replace(/\D/g, '');
+    if (digitsOnly.length < 4 || digitsOnly.length > 20) return null;
+    return digitsOnly;
+  }, []);
+
+  const normalizeName = useCallback((value: string) => {
+    return value
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9]/g, '')
+      .toLowerCase();
+  }, []);
+
+  const isNoiseTitle = useCallback((name: string) => /test\s*redis/i.test(name), []);
+
+  const extractCodeFromImageUrl = useCallback(
+    (url: string | null | undefined) => {
+      if (!url) return null;
+      const segments = url.match(/\d+/g);
+      if (!segments || segments.length === 0) return null;
+      const joined = segments.join('');
+      const candidate = normalizeCode(joined);
+      if (candidate) return candidate;
+      for (const segment of segments) {
+        const resolved = normalizeCode(segment);
+        if (resolved) return resolved;
+      }
+      return null;
+    },
+    [normalizeCode],
+  );
+
+  const codeCacheRef = useRef(new Map<string, string | null>());
+
+  const resolveCodeFromPayload = useCallback(
+    (payload: unknown): string | null => {
+      if (!payload || typeof payload !== 'object') return null;
+      const record = payload as Record<string, unknown>;
+      const direct = normalizeCode(record.code as string | null | undefined);
+      if (direct) return direct;
+      const altKeys = ['_id', 'id', 'barcode', 'product_code'];
+      for (const key of altKeys) {
+        const candidate = normalizeCode(record[key] as string | null | undefined);
+        if (candidate) return candidate;
+      }
+      const nested = record.product;
+      if (nested && typeof nested === 'object') {
+        const nestedRecord = nested as Record<string, unknown>;
+        const nestedCode = normalizeCode(nestedRecord.code as string | null | undefined);
+        if (nestedCode) return nestedCode;
+      }
+      return null;
+    },
+    [normalizeCode],
+  );
+
+  const fetchProductCodeFromSearch = useCallback(
+    async (name: string): Promise<string | null> => {
+      try {
+        const res = await fetch(
+          `${apiBase}/api/SearchProducts?query=${encodeURIComponent(name)}`,
+        );
+        if (!res.ok) return null;
+        const data = await res.json();
+        if (!data?.success || !Array.isArray(data.products)) return null;
+        const normalizedTarget = normalizeName(name);
+        const productsList = data.products as Product[];
+        const exactMatch = productsList.find((candidate) => {
+          if (!candidate?.name) return false;
+          if (isNoiseTitle(candidate.name)) return false;
+          return normalizeName(candidate.name) === normalizedTarget;
+        });
+        const fromExact = normalizeCode(exactMatch?.code);
+        if (fromExact) return fromExact;
+        const fallback = productsList.find((candidate) => normalizeCode(candidate.code));
+        if (fallback) {
+          return normalizeCode(fallback.code);
+        }
+        return null;
+      } catch (error) {
+        console.error('Failed to fetch product code from search', error);
+        return null;
+      }
+    },
+    [apiBase, normalizeCode, normalizeName, isNoiseTitle],
+  );
+
+  const resolveProductCode = useCallback(
+    async (product: Product, index: number): Promise<string | null> => {
+      const normalizedFromCode = normalizeCode(product.code);
+      if (normalizedFromCode) return normalizedFromCode;
+
+      const rawName = product.name ?? '';
+      const name = rawName.trim();
+      const cacheKey = `${name.toLowerCase()}|${product.image}`;
+
+      const imageResolved = extractCodeFromImageUrl(product.image);
+      if (imageResolved) {
+        if (name) {
+          codeCacheRef.current.set(cacheKey, imageResolved);
+        }
+        setProducts((prev) => {
+          if (index < 0 || index >= prev.length) return prev;
+          const current = prev[index];
+          if (current.name !== product.name || current.image !== product.image) return prev;
+          if (normalizeCode(current.code) === imageResolved) return prev;
+          const next = [...prev];
+          next[index] = { ...current, code: imageResolved };
+          return next;
+        });
+        return imageResolved;
+      }
+
+      if (!name) return null;
+
+      if (codeCacheRef.current.has(cacheKey)) {
+        const cached = codeCacheRef.current.get(cacheKey) ?? null;
+        if (cached) {
+          setProducts((prev) => {
+            if (index < 0 || index >= prev.length) return prev;
+            const current = prev[index];
+            if (current.name !== product.name || current.image !== product.image) return prev;
+            if (normalizeCode(current.code) === cached) return prev;
+            const next = [...prev];
+            next[index] = { ...current, code: cached };
+            return next;
+          });
+        }
+        return cached;
+      }
+
+      try {
+        const res = await fetch(`${apiBase}/api/product?query=${encodeURIComponent(name)}`);
+        if (res.ok) {
+          const data = await res.json();
+          const resolvedFromPayload = resolveCodeFromPayload(data);
+          const resolved = normalizeCode(resolvedFromPayload);
+          if (resolved) {
+            codeCacheRef.current.set(cacheKey, resolved);
+            setProducts((prev) => {
+              if (index < 0 || index >= prev.length) return prev;
+              const current = prev[index];
+              if (current.name !== product.name || current.image !== product.image) return prev;
+              if (normalizeCode(current.code) === resolved) return prev;
+              const next = [...prev];
+              next[index] = { ...current, code: resolved };
+              return next;
+            });
+            return resolved;
+          }
+        }
+      } catch (error) {
+        console.error('Failed to resolve product code', error);
+      }
+
+      const fallback = await fetchProductCodeFromSearch(name);
+      codeCacheRef.current.set(cacheKey, fallback ?? null);
+      if (fallback) {
+        setProducts((prev) => {
+          if (index < 0 || index >= prev.length) return prev;
+          const current = prev[index];
+          if (current.name !== product.name || current.image !== product.image) return prev;
+          if (normalizeCode(current.code) === fallback) return prev;
+          const next = [...prev];
+          next[index] = { ...current, code: fallback };
+          return next;
+        });
+      }
+      return fallback;
+    },
+    [
+      apiBase,
+      extractCodeFromImageUrl,
+      fetchProductCodeFromSearch,
+      normalizeCode,
+      resolveCodeFromPayload,
+    ],
+  );
 
   useEffect(() => {
     setSearchValue(query);
@@ -39,7 +225,6 @@ export default function SearchResults() {
   useEffect(() => {
     if (!query) return;
     setLoading(true);
-    const apiBase = process.env.NEXT_PUBLIC_API_URL || '';
     const start = performance.now();
     const showAlerts = devMode;
     fetch(`${apiBase}/api/SearchProducts?query=${encodeURIComponent(query)}`)
@@ -49,7 +234,17 @@ export default function SearchResults() {
       })
       .then((data) => {
         if (data.success) {
-          setProducts(data.products);
+          const sanitized = (data.products as Product[])
+            .filter((product) => product?.name && product?.image && !isNoiseTitle(product.name))
+            .map((product) => {
+              const normalizedCode = normalizeCode(product.code);
+              const withImage = normalizedCode ?? extractCodeFromImageUrl(product.image);
+              return {
+                ...product,
+                code: withImage ?? normalizedCode ?? null,
+              };
+            });
+          setProducts(sanitized);
           const elapsed = (performance.now() - start).toFixed(2);
           const source = data.source === 'cache' ? 'la cache' : 'OpenFoodFacts';
           if (showAlerts) {
@@ -61,7 +256,14 @@ export default function SearchResults() {
       })
       .catch(() => setProducts([]))
       .finally(() => setLoading(false));
-  }, [query, devMode]);
+  }, [
+    query,
+    devMode,
+    apiBase,
+    normalizeCode,
+    isNoiseTitle,
+    extractCodeFromImageUrl,
+  ]);
 
   useEffect(() => {
     if (query) return;
@@ -76,30 +278,32 @@ export default function SearchResults() {
   }, [devMode]);
 
   useEffect(() => {
+    products.forEach((product, index) => {
+      if (!normalizeCode(product.code)) {
+        void resolveProductCode(product, index);
+      }
+    });
+  }, [products, normalizeCode, resolveProductCode]);
+
+  useEffect(() => {
     if (replacementActive) {
       setSelectionMode(false);
       setSelected([]);
     }
   }, [replacementActive]);
 
-  const normalizeCode = (code: string | null | undefined) => {
-    if (!code) return null;
-    const trimmed = code.trim();
-    if (!trimmed || trimmed.toLowerCase() === 'undefined') return null;
-    return trimmed;
-  };
-
   const buildProductId = (product: Product, index: number) => {
     const normalized = normalizeCode(product.code);
-    if (normalized) return normalized;
+    if (normalized) return `${normalized}-${index}`;
     const slug = product.name.replace(/\s+/g, '-').toLowerCase();
     return `search-${index}-${slug}`;
   };
 
-  const handleClick = (product: Product, productId: string) => {
+  const handleClick = async (product: Product, productId: string, index: number) => {
     if (replacementActive && replacementTarget) {
+      const code = (await resolveProductCode(product, index)) ?? normalizeCode(product.code);
       const success = completeReplacement({
-        code: normalizeCode(product.code),
+        code,
         name: product.name,
         image: product.image || null,
       });
@@ -110,6 +314,7 @@ export default function SearchResults() {
       return;
     }
     if (selectionMode) {
+      const resolved = (await resolveProductCode(product, index)) ?? normalizeCode(product.code);
       setSelected((prev) => {
         if (prev.some((item) => item.id === productId)) {
           return prev.filter((item) => item.id !== productId);
@@ -119,15 +324,15 @@ export default function SearchResults() {
           setTimeout(() => setWarning(''), 2000);
           return prev;
         }
-        return [...prev, { id: productId, code: normalizeCode(product.code), name: product.name }];
+        return [...prev, { id: productId, code: resolved, name: product.name }];
       });
     } else {
-      const normalized = normalizeCode(product.code);
+      const normalized = (await resolveProductCode(product, index)) ?? normalizeCode(product.code);
       if (normalized) {
         router.push(`/producto?code=${encodeURIComponent(normalized)}`);
-      } else {
-        router.push(`/search?query=${encodeURIComponent(product.name)}`);
+        return;
       }
+      router.push(`/producto?query=${encodeURIComponent(product.name)}`);
     }
   };
 
@@ -232,7 +437,9 @@ export default function SearchResults() {
               <div
                 key={key}
                 className={`product-card${isSelected ? ' selected' : ''}`}
-                onClick={() => handleClick(p, productId)}
+                onClick={() => {
+                  void handleClick(p, productId, index);
+                }}
               >
                 <LazyImage src={p.image} alt={p.name} className="card-image" />
                 <h3 className="card-title">{p.name}</h3>
