@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useDevMode } from '@/app/providers/DevModeProvider';
 import { useCameraResults } from '@/app/providers/CameraResultsProvider';
@@ -8,7 +8,7 @@ import LazyImage from './LazyImage';
 import AlertPopup from './AlertPopup';
 
 interface Product {
-  code: string;
+  code: string | null;
   name: string;
   image: string;
 }
@@ -31,6 +31,7 @@ export default function SearchResults() {
   const { replacementTarget, completeReplacement, cancelReplacement } = useCameraResults();
 
   const replacementActive = useMemo(() => Boolean(replacementTarget), [replacementTarget]);
+  const apiBase = useMemo(() => process.env.NEXT_PUBLIC_API_URL || '', []);
 
   useEffect(() => {
     setSearchValue(query);
@@ -39,7 +40,6 @@ export default function SearchResults() {
   useEffect(() => {
     if (!query) return;
     setLoading(true);
-    const apiBase = process.env.NEXT_PUBLIC_API_URL || '';
     const start = performance.now();
     const showAlerts = devMode;
     fetch(`${apiBase}/api/SearchProducts?query=${encodeURIComponent(query)}`)
@@ -49,7 +49,12 @@ export default function SearchResults() {
       })
       .then((data) => {
         if (data.success) {
-          setProducts(data.products);
+          setProducts(
+            (data.products as Product[]).map((product) => ({
+              ...product,
+              code: normalizeCode(product.code),
+            })),
+          );
           const elapsed = (performance.now() - start).toFixed(2);
           const source = data.source === 'cache' ? 'la cache' : 'OpenFoodFacts';
           if (showAlerts) {
@@ -61,7 +66,7 @@ export default function SearchResults() {
       })
       .catch(() => setProducts([]))
       .finally(() => setLoading(false));
-  }, [query, devMode]);
+  }, [query, devMode, apiBase, normalizeCode]);
 
   useEffect(() => {
     if (query) return;
@@ -76,30 +81,95 @@ export default function SearchResults() {
   }, [devMode]);
 
   useEffect(() => {
+    products.forEach((product, index) => {
+      if (!normalizeCode(product.code)) {
+        void resolveProductCode(product, index);
+      }
+    });
+  }, [products, normalizeCode, resolveProductCode]);
+
+  useEffect(() => {
     if (replacementActive) {
       setSelectionMode(false);
       setSelected([]);
     }
   }, [replacementActive]);
 
-  const normalizeCode = (code: string | null | undefined) => {
+  const normalizeCode = useCallback((code: string | null | undefined) => {
     if (!code) return null;
     const trimmed = code.trim();
     if (!trimmed || trimmed.toLowerCase() === 'undefined') return null;
-    return trimmed;
-  };
+    const compact = trimmed.replace(/\s+/g, '');
+    if (!/^\d{4,20}$/.test(compact)) return null;
+    return compact;
+  }, []);
+
+  const codeCacheRef = useRef(new Map<string, string | null>());
+
+  const resolveProductCode = useCallback(
+    async (product: Product, index: number): Promise<string | null> => {
+      const normalized = normalizeCode(product.code);
+      if (normalized) return normalized;
+
+      const name = product.name.trim();
+      if (!name) return null;
+
+      const cacheKey = `${name.toLowerCase()}|${product.image}`;
+      if (codeCacheRef.current.has(cacheKey)) {
+        const cached = codeCacheRef.current.get(cacheKey) ?? null;
+        if (cached) {
+          setProducts((prev) => {
+            if (index < 0 || index >= prev.length) return prev;
+            const current = prev[index];
+            if (current.name !== product.name || current.image !== product.image) return prev;
+            if (normalizeCode(current.code) === cached) return prev;
+            const next = [...prev];
+            next[index] = { ...current, code: cached };
+            return next;
+          });
+        }
+        return cached;
+      }
+
+      try {
+        const res = await fetch(`${apiBase}/api/product?query=${encodeURIComponent(name)}`);
+        if (!res.ok) throw new Error(`status ${res.status}`);
+        const data = await res.json();
+        const resolved = normalizeCode((data?.code as string | null | undefined) ?? null);
+        codeCacheRef.current.set(cacheKey, resolved ?? null);
+        if (resolved) {
+          setProducts((prev) => {
+            if (index < 0 || index >= prev.length) return prev;
+            const current = prev[index];
+            if (current.name !== product.name || current.image !== product.image) return prev;
+            if (normalizeCode(current.code) === resolved) return prev;
+            const next = [...prev];
+            next[index] = { ...current, code: resolved };
+            return next;
+          });
+        }
+        return resolved ?? null;
+      } catch (error) {
+        console.error('Failed to resolve product code', error);
+        codeCacheRef.current.set(cacheKey, null);
+        return null;
+      }
+    },
+    [apiBase, normalizeCode],
+  );
 
   const buildProductId = (product: Product, index: number) => {
     const normalized = normalizeCode(product.code);
-    if (normalized) return normalized;
+    if (normalized) return `${normalized}-${index}`;
     const slug = product.name.replace(/\s+/g, '-').toLowerCase();
     return `search-${index}-${slug}`;
   };
 
-  const handleClick = (product: Product, productId: string) => {
+  const handleClick = async (product: Product, productId: string, index: number) => {
     if (replacementActive && replacementTarget) {
+      const code = (await resolveProductCode(product, index)) ?? normalizeCode(product.code);
       const success = completeReplacement({
-        code: normalizeCode(product.code),
+        code,
         name: product.name,
         image: product.image || null,
       });
@@ -110,6 +180,7 @@ export default function SearchResults() {
       return;
     }
     if (selectionMode) {
+      const resolved = (await resolveProductCode(product, index)) ?? normalizeCode(product.code);
       setSelected((prev) => {
         if (prev.some((item) => item.id === productId)) {
           return prev.filter((item) => item.id !== productId);
@@ -119,15 +190,15 @@ export default function SearchResults() {
           setTimeout(() => setWarning(''), 2000);
           return prev;
         }
-        return [...prev, { id: productId, code: normalizeCode(product.code), name: product.name }];
+        return [...prev, { id: productId, code: resolved, name: product.name }];
       });
     } else {
-      const normalized = normalizeCode(product.code);
+      const normalized = (await resolveProductCode(product, index)) ?? normalizeCode(product.code);
       if (normalized) {
         router.push(`/producto?code=${encodeURIComponent(normalized)}`);
-      } else {
-        router.push(`/search?query=${encodeURIComponent(product.name)}`);
+        return;
       }
+      router.push(`/producto?query=${encodeURIComponent(product.name)}`);
     }
   };
 
@@ -232,7 +303,9 @@ export default function SearchResults() {
               <div
                 key={key}
                 className={`product-card${isSelected ? ' selected' : ''}`}
-                onClick={() => handleClick(p, productId)}
+                onClick={() => {
+                  void handleClick(p, productId, index);
+                }}
               >
                 <LazyImage src={p.image} alt={p.name} className="card-image" />
                 <h3 className="card-title">{p.name}</h3>

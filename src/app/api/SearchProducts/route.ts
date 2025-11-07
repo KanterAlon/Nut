@@ -58,20 +58,41 @@ export async function GET(req: NextRequest) {
 }
 
 interface OffProductRaw {
-  code: string;
-  product_name: string;
-  image_url: string;
+  code?: string | null;
+  product_name?: string | null;
+  image_url?: string | null;
+  url?: string | null;
 }
 
 interface OffResponse {
   products: OffProductRaw[];
 }
 
+const sanitizeCode = (value: string | null | undefined) => {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.toLowerCase() === 'undefined') return null;
+  const compact = trimmed.replace(/\s+/g, '');
+  if (!/^\d{4,20}$/.test(compact)) return null;
+  return compact;
+};
+
+const extractCodeFromUrl = (url: string | null | undefined) => {
+  if (!url) return null;
+  const match = /\/product\/(\d+)/i.exec(url);
+  if (!match) return null;
+  return sanitizeCode(match[1]);
+};
+
+const resolveProductCode = (product: OffProductRaw) => {
+  return sanitizeCode(product.code) ?? extractCodeFromUrl(product.url) ?? null;
+};
+
 async function fetchProducts(query: string) {
   const searchParams = new URLSearchParams({
     search_terms: query,
     page_size: '20',
-    fields: 'code,product_name,image_url',
+    fields: 'code,product_name,image_url,url',
     search_simple: '1',
     action: 'process',
     json: '1',
@@ -82,11 +103,22 @@ async function fetchProducts(query: string) {
   const result: OffResponse = await res.json();
 
   const productos = (result.products || [])
-    .filter((p) => p.product_name && p.image_url && p.code)
-    .map((p) => ({ code: p.code, name: p.product_name.trim(), image: p.image_url }));
+    .map((p) => ({
+      code: resolveProductCode(p),
+      name: typeof p.product_name === 'string' ? p.product_name.trim() : '',
+      image: typeof p.image_url === 'string' ? p.image_url : '',
+    }))
+    .filter((p) => p.name && p.image);
 
   const map = new Map<string, { code: string; name: string; images: string[] }>();
+  const withoutCode: Array<{ code: null; name: string; image: string }> = [];
+
   for (const prod of productos) {
+    if (!prod.code) {
+      withoutCode.push({ code: null, name: prod.name, image: prod.image });
+      continue;
+    }
+
     const existing = map.get(prod.code);
     if (!existing) {
       map.set(prod.code, { code: prod.code, name: prod.name, images: [prod.image] });
@@ -95,9 +127,11 @@ async function fetchProducts(query: string) {
     existing.images.push(prod.image);
   }
 
-  return Array.from(map.values()).map((p) => ({
+  const withCode = Array.from(map.values()).map((p) => ({
     code: p.code,
     name: p.name,
     image: p.images.find(Boolean) || '',
   }));
+
+  return [...withCode, ...withoutCode];
 }
