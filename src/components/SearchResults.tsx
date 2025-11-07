@@ -52,21 +52,20 @@ export default function SearchResults() {
       .toLowerCase();
   }, []);
 
-  const isNoiseTitle = useCallback((name: string) => /test\s*redis/i.test(name), []);
+  const isNoiseTitle = useCallback((value: string) => /test\s*redis/i.test(value), []);
 
   const extractCodeFromImageUrl = useCallback(
     (url: string | null | undefined) => {
       if (!url) return null;
-      const segments = url.match(/\d+/g);
-      if (!segments || segments.length === 0) return null;
-      const joined = segments.join('');
-      const candidate = normalizeCode(joined);
-      if (candidate) return candidate;
+      const matches = url.match(/\d+/g);
+      if (!matches || matches.length === 0) return null;
+      const segments = [...new Set(matches)].sort((a, b) => b.length - a.length);
       for (const segment of segments) {
         const resolved = normalizeCode(segment);
         if (resolved) return resolved;
       }
-      return null;
+      const combined = normalizeCode(segments.join(''));
+      return combined;
     },
     [normalizeCode],
   );
@@ -97,23 +96,25 @@ export default function SearchResults() {
 
   const fetchProductCodeFromSearch = useCallback(
     async (name: string): Promise<string | null> => {
+      const trimmed = name.trim();
+      if (!trimmed) return null;
       try {
         const res = await fetch(
-          `${apiBase}/api/SearchProducts?query=${encodeURIComponent(name)}`,
+          `${apiBase}/api/SearchProducts?query=${encodeURIComponent(trimmed)}`,
         );
         if (!res.ok) return null;
         const data = await res.json();
         if (!data?.success || !Array.isArray(data.products)) return null;
-        const normalizedTarget = normalizeName(name);
-        const productsList = data.products as Product[];
-        const exactMatch = productsList.find((candidate) => {
+        const normalizedTarget = normalizeName(trimmed);
+        const candidates = data.products as Product[];
+        const exact = candidates.find((candidate) => {
           if (!candidate?.name) return false;
           if (isNoiseTitle(candidate.name)) return false;
           return normalizeName(candidate.name) === normalizedTarget;
         });
-        const fromExact = normalizeCode(exactMatch?.code);
-        if (fromExact) return fromExact;
-        const fallback = productsList.find((candidate) => normalizeCode(candidate.code));
+        const exactCode = normalizeCode(exact?.code);
+        if (exactCode) return exactCode;
+        const fallback = candidates.find((candidate) => normalizeCode(candidate.code));
         if (fallback) {
           return normalizeCode(fallback.code);
         }
@@ -128,28 +129,27 @@ export default function SearchResults() {
 
   const resolveProductCode = useCallback(
     async (product: Product, index: number): Promise<string | null> => {
-      const normalizedFromCode = normalizeCode(product.code);
-      if (normalizedFromCode) return normalizedFromCode;
+      const direct = normalizeCode(product.code);
+      if (direct) return direct;
 
-      const rawName = product.name ?? '';
-      const name = rawName.trim();
+      const name = product.name?.trim() ?? '';
       const cacheKey = `${name.toLowerCase()}|${product.image}`;
 
-      const imageResolved = extractCodeFromImageUrl(product.image);
-      if (imageResolved) {
+      const fromImage = extractCodeFromImageUrl(product.image);
+      if (fromImage) {
         if (name) {
-          codeCacheRef.current.set(cacheKey, imageResolved);
+          codeCacheRef.current.set(cacheKey, fromImage);
         }
         setProducts((prev) => {
           if (index < 0 || index >= prev.length) return prev;
           const current = prev[index];
           if (current.name !== product.name || current.image !== product.image) return prev;
-          if (normalizeCode(current.code) === imageResolved) return prev;
+          if (normalizeCode(current.code) === fromImage) return prev;
           const next = [...prev];
-          next[index] = { ...current, code: imageResolved };
+          next[index] = { ...current, code: fromImage };
           return next;
         });
-        return imageResolved;
+        return fromImage;
       }
 
       if (!name) return null;
@@ -174,8 +174,7 @@ export default function SearchResults() {
         const res = await fetch(`${apiBase}/api/product?query=${encodeURIComponent(name)}`);
         if (res.ok) {
           const data = await res.json();
-          const resolvedFromPayload = resolveCodeFromPayload(data);
-          const resolved = normalizeCode(resolvedFromPayload);
+          const resolved = normalizeCode(resolveCodeFromPayload(data));
           if (resolved) {
             codeCacheRef.current.set(cacheKey, resolved);
             setProducts((prev) => {
@@ -207,6 +206,7 @@ export default function SearchResults() {
           return next;
         });
       }
+
       return fallback;
     },
     [
@@ -237,12 +237,9 @@ export default function SearchResults() {
           const sanitized = (data.products as Product[])
             .filter((product) => product?.name && product?.image && !isNoiseTitle(product.name))
             .map((product) => {
-              const normalizedCode = normalizeCode(product.code);
-              const withImage = normalizedCode ?? extractCodeFromImageUrl(product.image);
-              return {
-                ...product,
-                code: withImage ?? normalizedCode ?? null,
-              };
+              const normalized = normalizeCode(product.code);
+              const fromImage = extractCodeFromImageUrl(product.image);
+              return { ...product, code: normalized ?? fromImage ?? null };
             });
           setProducts(sanitized);
           const elapsed = (performance.now() - start).toFixed(2);
@@ -261,8 +258,8 @@ export default function SearchResults() {
     devMode,
     apiBase,
     normalizeCode,
-    isNoiseTitle,
     extractCodeFromImageUrl,
+    isNoiseTitle,
   ]);
 
   useEffect(() => {
@@ -278,6 +275,13 @@ export default function SearchResults() {
   }, [devMode]);
 
   useEffect(() => {
+    if (replacementActive) {
+      setSelectionMode(false);
+      setSelected([]);
+    }
+  }, [replacementActive]);
+
+  useEffect(() => {
     products.forEach((product, index) => {
       if (!normalizeCode(product.code)) {
         void resolveProductCode(product, index);
@@ -285,25 +289,18 @@ export default function SearchResults() {
     });
   }, [products, normalizeCode, resolveProductCode]);
 
-  useEffect(() => {
-    if (replacementActive) {
-      setSelectionMode(false);
-      setSelected([]);
-    }
-  }, [replacementActive]);
-
   const buildProductId = (product: Product, index: number) => {
     const normalized = normalizeCode(product.code);
-    if (normalized) return `${normalized}-${index}`;
+    if (normalized) return normalized;
     const slug = product.name.replace(/\s+/g, '-').toLowerCase();
     return `search-${index}-${slug}`;
   };
 
   const handleClick = async (product: Product, productId: string, index: number) => {
     if (replacementActive && replacementTarget) {
-      const code = (await resolveProductCode(product, index)) ?? normalizeCode(product.code);
+      const resolved = (await resolveProductCode(product, index)) ?? normalizeCode(product.code);
       const success = completeReplacement({
-        code,
+        code: resolved,
         name: product.name,
         image: product.image || null,
       });
@@ -349,8 +346,8 @@ export default function SearchResults() {
       .map((value) => value.trim())
       .filter(Boolean);
     if (values.length < 2) return;
-    const query = values.map((value) => encodeURIComponent(value)).join(',');
-    router.push(`/compare?codes=${query}`);
+    const comparisonQuery = values.map((value) => encodeURIComponent(value)).join(',');
+    router.push(`/compare?codes=${comparisonQuery}`);
   };
 
   const handleSearchSubmit = (event: FormEvent<HTMLFormElement>) => {
